@@ -1,0 +1,22 @@
+experiment:
+  seed: 131
+  fold: 0
+  data_path: "./data/simulation.npy"
+  data_label: "./data/labels.npy"
+  save_dir: "./result"
+
+system:
+  device: "cuda"
+  dtype: "float32"
+
+model:
+  num_tv: 2
+  hidden_shape: 8
+  bottleneck_shape: 16
+  neural_private_shape: 8
+
+train:
+  epochs: 2000
+  lr: 0.001
+  coef_cross: 0.5
+  batch_size: 64

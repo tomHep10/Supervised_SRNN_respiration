@@ -1,0 +1,16 @@
+name: SSRNN
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - matplotlib=3.10.3
+  - scikit-learn=1.6.1
+  - numpy=2.2.6
+  - pyyaml=6.0.2
+  - pip:
+    - --index-url https://download.pytorch.org/whl/cu129
+    - torch==2.8.0
+    - torchvision==0.23.0
+    - torchaudio==2.8.0
