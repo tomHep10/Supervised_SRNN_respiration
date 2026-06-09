@@ -26,7 +26,7 @@ conda activate SSRNN
 
 ---
 
-## Running the Model
+## Running the Model (using Simulated Data)
 
 ### Single fold (example)
 ```bash
