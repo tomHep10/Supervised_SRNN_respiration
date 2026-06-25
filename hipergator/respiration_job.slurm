@@ -22,8 +22,8 @@
 #SBATCH --mail-user=t.heeps@ufl.edu
 #SBATCH --account=npadillacoreano          # verify with sacctmgr (your blue dir => npadillacoreano)
 #SBATCH --qos=npadillacoreano              # or npadillacoreano-b for burst
-#SBATCH --partition=gpu
-#SBATCH --gres=gpu:a100:1                   # confirm GPU type available to your group
+#SBATCH --partition=hpg-ai                  # HiPerGator A100 partition (the old 'gpu' name is retired)
+#SBATCH --gres=gpu:1                        # 1 GPU of whatever type the partition has (a100)
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
