@@ -1,0 +1,26 @@
+# Smoke-test config created by Claude.
+# Identical to ../config.yaml EXCEPT save_dir points into claude_runs/ so the
+# original result/ checkpoints are never overwritten. Epochs is overridden on the
+# command line (--epochs) for a fast correctness check.
+experiment:
+  seed: 131
+  fold: 0
+  data_path: "./data/simulation.npy"
+  data_label: "./data/labels.npy"
+  save_dir: "./claude_runs/result"
+
+system:
+  device: "cuda"      # code auto-falls back to CPU if no GPU is present
+  dtype: "float32"
+
+model:
+  num_tv: 2
+  hidden_shape: 8
+  bottleneck_shape: 16
+  neural_private_shape: 8
+
+train:
+  epochs: 2000
+  lr: 0.001
+  coef_cross: 0.5
+  batch_size: 64
