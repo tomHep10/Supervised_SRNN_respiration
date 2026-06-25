@@ -19,6 +19,10 @@ Read the files in order if you want the full story, or jump to what you need.
 | [05_hipergator_guide.md](05_hipergator_guide.md) | Running the model as a batch job on UF HiPerGator (SLURM); ready-to-edit job scripts in [`../hipergator/`](../hipergator/). |
 | [06_project_context.md](06_project_context.md) | The research goal (social valence from respiration), dataset, SRNN-vs-SSLD decision, and open questions. |
 
+**Your respiration pipeline** lives in [`../respiration/`](../respiration/) — scripts that
+turn your raw `.h5` + BORIS `.csv` files into windows, train the SRNN, and analyze the
+latent for social valence. See [respiration/README.md](../respiration/README.md).
+
 ## TL;DR of what this model is
 
 You have multi-channel time-series data (here: 20 simulated "neurons" recorded over
