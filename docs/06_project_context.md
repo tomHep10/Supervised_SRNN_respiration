@@ -129,3 +129,46 @@ These are starting observations, **not** final answers — flagged for the analy
 - Latent analyses (Q6) map onto saved outputs: the continuous latent `h` (inference
   network output) → PCA/UMAP/decoding; the state posterior `pos_test` → inferred
   switch sequence and transition matrices.
+
+<!-- ======================================================================= -->
+<!-- NEW ADDITION (everything above this line is the original context doc)    -->
+<!-- Added 2026-06-26 — results from the first full 4-fold HiPerGator run     -->
+<!-- ======================================================================= -->
+
+---
+
+## Results so far (first full 4-fold HiPerGator run, completed 2026-06-25)
+
+*These are findings from the first complete run, not in the original context above. Run
+config: supervised SRNN, `coef_cross = 0.5`, `hidden_shape = 8`, `num_tv = 4`,
+leave-one-recording-out (`split_mode = recording`), 2000 epochs/fold.*
+
+**Feasibility (Q1–Q3):** confirmed feasible with windowing. All 4 folds trained to 2000
+epochs and converged to low reconstruction error (test MSE 0.003–0.020) on the
+**30 s / T=1500 contiguous windows** — full 10-min recordings were *not* used, consistent
+with the sequence-length constraint noted above.
+
+**Valence signal (Q5):** a **suggestive descriptive signal**, not yet a certified decode.
+- Respiratory-state **switch-rate** is higher for positive than negative valence
+  (pooled 0.295 vs 0.243) and **rank-orders perfectly across all 4 recordings**
+  (positives 0.309, 0.280 > negatives 0.252, 0.234; no overlap).
+- The signal is in switching **dynamics**, not **state occupancy** (occupancy ≈ identical
+  across valence; only 2 of the 4 discrete states are ever used → effectively bistable).
+- **Leakage-free LORO decoding returned balanced-acc = 0.000** for latent `h`, switch
+  stats, and both combined. This is an **n=4 artifact** (2 recordings/class can't calibrate
+  a held-out boundary, so it flips systematically) — *not* evidence against the effect, and
+  not trustworthy in either direction at this sample size.
+
+**Most informative analyses (Q6), observed:** switch-rate / switch statistics were the
+discriminating feature; state-occupancy and the latent `h` (via LORO) were not, at n=4.
+
+**Caveat (ties to README caveat #1):** this run used `coef_cross = 0.5`, so the switch
+separation could be **label-driven** rather than discovered. The discovery-mode run
+(`coef_cross = 0`) remains the recommended primary and is still **to do**.
+
+**Next steps:** (1) more recordings — the only real fix for LORO power; (2) interim
+defensible statistic via window-level decode or a permutation test on per-recording
+switch-rates; (3) re-run in discovery mode (`coef_cross = 0`) and compare.
+
+*Full numeric output and the operational write-up live in
+[respiration/README.md](../respiration/README.md#results--first-full-4-fold-hipergator-run-run-completed-2026-06-25).*

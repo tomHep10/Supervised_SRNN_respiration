@@ -63,3 +63,68 @@ python respiration/collect_folds.py --config respiration/config_respiration_hpg.
 For the pooled held-out windows: switch-rate and state-occupancy **by valence**, plus
 leakage-free leave-one-recording-out decoding of valence from (a) the latent `h`,
 (b) switch statistics, (c) both.
+
+<!-- ======================================================================= -->
+<!-- NEW ADDITION (everything above this line is the original doc)            -->
+<!-- Added 2026-06-26 — first full 4-fold HiPerGator run                      -->
+<!-- ======================================================================= -->
+
+## Results — first full 4-fold HiPerGator run (run completed 2026-06-25)
+
+**Run:** `coef_cross = 0.5` (behaviorally supervised), `hidden_shape = 8`, `num_tv = 4`,
+`split_mode = recording`, 2000 epochs/fold. Checkpoints
+`respiration/result/resp_srnn_recording_h8_fold{0..3}.pt`.
+
+### Training — all 4 folds finished cleanly
+All four checkpoints written; every log ends in `done. checkpoint -> …`, no tracebacks.
+
+| Fold | Held-out valence | Final test MSE |
+|---|---|---|
+| 0 | positive (RI1) | 0.0054 |
+| 1 | positive (RI1) | 0.0034 |
+| 2 | negative (RI2) | 0.0200 |
+| 3 | negative (RI2) | 0.0137 |
+
+(The per-fold logs print `valence decoding: skipped` — expected: under leave-one-recording-out
+each fold's test set is a *single* valence, so valence is only decodable by pooling across
+folds in `collect_folds.py`.)
+
+### Pooled valence test (`collect_folds.py`)
+```
+pooled windows=40  pos=20 neg=20
+  positive(RI1): switch-rate=0.295  state-occupancy=[0.322, 0.0, 0.0, 0.678]
+  negative(RI2): switch-rate=0.243  state-occupancy=[0.3, 0.0, 0.0, 0.7]
+
+LEAKAGE-FREE valence decoding (leave-one-recording-out on the decoder):
+  [latent h     ] LORO balanced-acc=0.000 acc=0.000
+  [switch stats ] LORO balanced-acc=0.000 acc=0.000
+  [latent+switch] LORO balanced-acc=0.000 acc=0.000
+(chance=0.5; n=4 recordings -> treat as a pilot signal, not significance)
+```
+Per-fold mean switch-rates: fold0=0.309, fold1=0.280 (positive) vs fold2=0.252,
+fold3=0.234 (negative).
+
+### Reading
+- **Descriptive signal in the expected direction.** Switch-rate is higher for positive
+  (0.295) than negative (0.243), and this **rank-orders perfectly across all 4 recordings**
+  (both positives above both negatives, no overlap). Signal is in switching *dynamics*, not
+  state occupancy (occupancy ≈ identical; only states 0 and 3 are ever used → effectively
+  bistable).
+- **The 0.000 LORO accuracy is an n=4 artifact, not evidence against the effect.** With 2
+  recordings/class, leave-one-recording-out can't calibrate a decision boundary from the one
+  remaining same-class example, so it flips systematically (a clean 0.000 rather than ~0.5
+  noise). This metric is untrustworthy in either direction at this n.
+- **Caveat carried forward:** this run used `coef_cross = 0.5`, so the switch separation
+  could be label-driven (see caveat #1 above). The discovery-mode run (`coef_cross = 0`) is
+  still the recommended primary.
+
+### Suggested next steps
+1. More recordings — the only real fix for the LORO metric (even n=6–8 lets the decoder calibrate).
+2. Interim defensible statistic: window-level decode (`split_mode='window'`) or a permutation
+   test on per-recording switch-rates.
+3. Re-run in discovery mode (`coef_cross = 0`) and compare to this supervised run.
+
+> **Figures note:** per-fold PNGs in `respiration/plot/` (`resp_recon.png`, `states.png`,
+> `latent_pca.png`) currently show only **fold 3** — every fold overwrites the same filenames.
+> Checkpoints for all folds are intact, so `collect_folds.py` still uses everything. Add a
+> `_fold{k}` suffix to the figure filenames to save all four.
