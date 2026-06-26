@@ -21,3 +21,7 @@ claude_runs/
 Thumbs.db
 .vscode/
 .idea/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
