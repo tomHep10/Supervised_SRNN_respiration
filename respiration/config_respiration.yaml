@@ -13,12 +13,24 @@ paths:
   plot_dir: "./respiration/plot"
 
 # The 4 valence recordings (matched to h5 + csv by this 3-token prefix).
-# Chosen by sniffing richness: 2 richest RI1 (positive) + 2 richest RI2 (negative).
+# ALL available recordings (7 positive RI1 + 8 negative RI2) — enough for a
+# meaningful leave-one-recording-out decoder (n=15).
 recordings:
-  - "RI1_s1_1"   # positive, 233.5s sniffing (richest RI1)
-  - "RI1_s1_2"   # positive, 137.3s sniffing
-  - "RI2_s2_3"   # negative, 40.1s sniffing (richest RI2)
-  - "RI2_s3_6"   # negative, 19.6s sniffing
+  - "RI1_s1_1"   # positive
+  - "RI1_s1_2"
+  - "RI1_s2_3"
+  - "RI1_s2_4"
+  - "RI1_s3_6"
+  - "RI1_s4_7"
+  - "RI1_s4_8"
+  - "RI2_s1_1"   # negative
+  - "RI2_s1_2"
+  - "RI2_s2_3"
+  - "RI2_s2_4"
+  - "RI2_s3_5"
+  - "RI2_s3_6"
+  - "RI2_s4_7"
+  - "RI2_s4_8"
 
 # Per-recording valence label (from h5 metadata 'trial_type'): RI1=positive, RI2=negative.
 # Used ONLY for downstream analysis (PCA/decoding), NOT fed to the model.
@@ -68,6 +80,6 @@ train:
   fold: 0                    # which recording (or window-fold) is held out for test
   epochs: 2000
   lr: 0.001
-  coef_cross: 0.5            # behavioral supervision strength. Set 0 for unsupervised (discovered) switches.
-  batch_size: 64
+  coef_cross: 0.0           # discovery (unsupervised switches)
+  batch_size: 256           # fits all train windows in ONE batch -> per-fold time ~flat as recordings grow
   eval_every: 25             # run/print test eval every N epochs (keeps memory/IO sane on real data)

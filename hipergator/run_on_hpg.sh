@@ -36,7 +36,7 @@ if [ -z "${ACCT:-}" ]; then
 fi
 
 mkdir -p logs
-echo ">> submitting 4-fold leave-one-recording-out GPU array (coef_cross=0, discovery)..."
+echo ">> submitting leave-one-recording-out GPU array (15 folds, coef_cross=0, discovery)..."
 sbatch --account="$ACCT" --qos="$ACCT" hipergator/respiration_job.slurm
 
 echo ""

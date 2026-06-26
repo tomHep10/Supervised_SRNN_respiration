@@ -15,7 +15,7 @@ NOTE: with only 4 recordings (2 pos / 2 neg) this is a PILOT signal, not a p-val
 Run after all 4 folds have trained:
     python respiration/collect_folds.py --config respiration/config_respiration_hpg.yaml
 """
-import os, sys, argparse
+import os, sys, glob, re, argparse
 import numpy as np
 import yaml
 import torch
@@ -52,15 +52,19 @@ def decode(name, X, val, grp):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="respiration/config_respiration_hpg.yaml")
-    ap.add_argument("--folds", type=int, default=4)
     args = ap.parse_args()
     cfg = yaml.safe_load(open(args.config))
     paths = cfg["paths"]; h = int(cfg["model"]["hidden_shape"])
     device = torch.device("cpu")
 
+    # auto-detect every fold checkpoint that exists
+    ckpts = sorted(glob.glob(os.path.join(paths["save_dir"], f"resp_srnn_recording_h{h}_fold*.pt")),
+                   key=lambda p: int(re.search(r"fold(\d+)", p).group(1)))
+    print(f"found {len(ckpts)} fold checkpoints")
+
     LAT, OCC, SWR, VAL, GRP = [], [], [], [], []
-    for f in range(args.folds):
-        ckpt = os.path.join(paths["save_dir"], f"resp_srnn_recording_h{h}_fold{f}.pt")
+    for ckpt in ckpts:
+        f = int(re.search(r"fold(\d+)", ckpt).group(1))
         if not os.path.exists(ckpt):
             print(f"[skip] missing {ckpt}"); continue
         ck = torch.load(ckpt, weights_only=False, map_location=device)

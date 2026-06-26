@@ -26,10 +26,10 @@
 #SBATCH --gres=gpu:1                         # 1 GPU of whatever type the partition has
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=24gb
-#SBATCH --time=08:00:00
-#SBATCH --array=0-3                         # 4 recordings, leave-one-out
+#SBATCH --cpus-per-task=4                    # CPU not the bottleneck (Python time-loop + GPU); more cores won't help
+#SBATCH --mem=32gb
+#SBATCH --time=12:00:00                      # ~4-5h/fold expected; generous buffer
+#SBATCH --array=0-14                         # 15 recordings, leave-one-recording-out (one GPU each)
 
 module load conda
 conda activate SSRNN
