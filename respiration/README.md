@@ -66,65 +66,53 @@ leakage-free leave-one-recording-out decoding of valence from (a) the latent `h`
 
 <!-- ======================================================================= -->
 <!-- NEW ADDITION (everything above this line is the original doc)            -->
-<!-- Added 2026-06-26 — first full 4-fold HiPerGator run                      -->
+<!-- Last updated 2026-06-26 — describes the experiment currently being run   -->
 <!-- ======================================================================= -->
 
-## Results — first full 4-fold HiPerGator run (run completed 2026-06-25)
+## Current experiment (running now — updated 2026-06-26)
 
-**Run:** `coef_cross = 0.5` (behaviorally supervised), `hidden_shape = 8`, `num_tv = 4`,
-`split_mode = recording`, 2000 epochs/fold. Checkpoints
-`respiration/result/resp_srnn_recording_h8_fold{0..3}.pt`.
+> Supersedes the "Data design" section above, which describes the original 4-recording
+> pilot. The experiment now running uses the **full 15-recording set in discovery mode**.
 
-### Training — all 4 folds finished cleanly
-All four checkpoints written; every log ends in `done. checkpoint -> …`, no tracebacks.
+**What changed from the original pilot**
 
-| Fold | Held-out valence | Final test MSE |
+| | Original pilot (above) | **Current run** |
 |---|---|---|
-| 0 | positive (RI1) | 0.0054 |
-| 1 | positive (RI1) | 0.0034 |
-| 2 | negative (RI2) | 0.0200 |
-| 3 | negative (RI2) | 0.0137 |
+| Recordings | 4 (2 positive / 2 negative) | **15 — 7 positive (RI1) + 8 negative (RI2)** |
+| Windows | 40 `(40,1500,1)` | **147 `(147,1500,1)`** (top-10 sniffing-rich 30 s windows/recording) |
+| `train.coef_cross` | 0.5 (behaviorally supervised) | **0.0 — DISCOVERY** (switches learned from respiration, not sniff labels) |
+| Cross-validation | array 0–3 | **array 0–14** (leave-one-recording-out across all 15) |
 
-(The per-fold logs print `valence decoding: skipped` — expected: under leave-one-recording-out
-each fold's test set is a *single* valence, so valence is only decodable by pooling across
-folds in `collect_folds.py`.)
+**Why discovery mode.** RI2 (negative) windows have ~0% sniffing, so with `coef_cross > 0`
+the sniff-state labels essentially only fire for RI1 and any valence separation could be
+label-driven. `coef_cross = 0` makes the switches **discovered from respiration** (see caveat
+#1 above). The behaviorally-supervised variant (`coef_cross = 0.5`) can be run separately for
+comparison.
 
-### Pooled valence test (`collect_folds.py`)
+**Recordings (15), valence from the `RIx` prefix** (`RI1 = positive = 1`, `RI2 = negative = 0`):
 ```
-pooled windows=40  pos=20 neg=20
-  positive(RI1): switch-rate=0.295  state-occupancy=[0.322, 0.0, 0.0, 0.678]
-  negative(RI2): switch-rate=0.243  state-occupancy=[0.3, 0.0, 0.0, 0.7]
-
-LEAKAGE-FREE valence decoding (leave-one-recording-out on the decoder):
-  [latent h     ] LORO balanced-acc=0.000 acc=0.000
-  [switch stats ] LORO balanced-acc=0.000 acc=0.000
-  [latent+switch] LORO balanced-acc=0.000 acc=0.000
-(chance=0.5; n=4 recordings -> treat as a pilot signal, not significance)
+positive (RI1): RI1_s1_1  RI1_s1_2  RI1_s2_3  RI1_s2_4  RI1_s3_6  RI1_s4_7  RI1_s4_8
+negative (RI2): RI2_s1_1  RI2_s1_2  RI2_s2_3  RI2_s2_4  RI2_s3_5  RI2_s3_6  RI2_s4_7  RI2_s4_8
 ```
-Per-fold mean switch-rates: fold0=0.309, fold1=0.280 (positive) vs fold2=0.252,
-fold3=0.234 (negative).
 
-### Reading
-- **Descriptive signal in the expected direction.** Switch-rate is higher for positive
-  (0.295) than negative (0.243), and this **rank-orders perfectly across all 4 recordings**
-  (both positives above both negatives, no overlap). Signal is in switching *dynamics*, not
-  state occupancy (occupancy ≈ identical; only states 0 and 3 are ever used → effectively
-  bistable).
-- **The 0.000 LORO accuracy is an n=4 artifact, not evidence against the effect.** With 2
-  recordings/class, leave-one-recording-out can't calibrate a decision boundary from the one
-  remaining same-class example, so it flips systematically (a clean 0.000 rather than ~0.5
-  noise). This metric is untrustworthy in either direction at this n.
-- **Caveat carried forward:** this run used `coef_cross = 0.5`, so the switch separation
-  could be label-driven (see caveat #1 above). The discovery-mode run (`coef_cross = 0`) is
-  still the recommended primary.
+**Fixed settings (unchanged):** `model.num_tv = 4`, `hidden_shape = 8`, `bottleneck_shape = 16`,
+`neural_private_shape = 8`; preprocess → 50 Hz, bandpass 0.1–20 Hz, z-scored, subject-only;
+`train.epochs = 2000`, `lr = 0.001`, `batch_size = 256` (all train windows in one batch),
+`split_mode = recording`, `seed = 131`.
 
-### Suggested next steps
-1. More recordings — the only real fix for the LORO metric (even n=6–8 lets the decoder calibrate).
-2. Interim defensible statistic: window-level decode (`split_mode='window'`) or a permutation
-   test on per-recording switch-rates.
-3. Re-run in discovery mode (`coef_cross = 0`) and compare to this supervised run.
+**How it's launched** — `hipergator/respiration_job.slurm` as a SLURM array
+(`--array=0-14`, partition `hpg-b200`, 1 GPU/fold), each task running:
+```bash
+python respiration/train_respiration.py --config respiration/config_respiration_hpg.yaml --fold $SLURM_ARRAY_TASK_ID --split recording
+python respiration/plot_respiration.py  --config respiration/config_respiration_hpg.yaml --fold $SLURM_ARRAY_TASK_ID --split recording
+```
+Writes checkpoints `respiration/result/resp_srnn_recording_h8_fold{0..14}.pt`. After all 15
+folds finish, pool them for the leakage-free valence number:
+```bash
+python respiration/collect_folds.py --config respiration/config_respiration_hpg.yaml
+```
 
 > **Figures note:** per-fold PNGs in `respiration/plot/` (`resp_recon.png`, `states.png`,
-> `latent_pca.png`) currently show only **fold 3** — every fold overwrites the same filenames.
+> `latent_pca.png`) share filenames across folds, so they show only the **last fold to run**.
 > Checkpoints for all folds are intact, so `collect_folds.py` still uses everything. Add a
-> `_fold{k}` suffix to the figure filenames to save all four.
+> `_fold{k}` suffix to the figure filenames to keep all 15.

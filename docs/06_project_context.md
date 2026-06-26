@@ -132,43 +132,42 @@ These are starting observations, **not** final answers — flagged for the analy
 
 <!-- ======================================================================= -->
 <!-- NEW ADDITION (everything above this line is the original context doc)    -->
-<!-- Added 2026-06-26 — results from the first full 4-fold HiPerGator run     -->
+<!-- Last updated 2026-06-26 — describes the experiment currently being run   -->
 <!-- ======================================================================= -->
 
 ---
 
-## Results so far (first full 4-fold HiPerGator run, completed 2026-06-25)
+## Current experiment (running now — updated 2026-06-26)
 
-*These are findings from the first complete run, not in the original context above. Run
-config: supervised SRNN, `coef_cross = 0.5`, `hidden_shape = 8`, `num_tv = 4`,
-leave-one-recording-out (`split_mode = recording`), 2000 epochs/fold.*
+*Not part of the original context above. The **Dataset** section above describes the
+original 4-recording pilot; the experiment now running uses the full set below.*
 
-**Feasibility (Q1–Q3):** confirmed feasible with windowing. All 4 folds trained to 2000
-epochs and converged to low reconstruction error (test MSE 0.003–0.020) on the
-**30 s / T=1500 contiguous windows** — full 10-min recordings were *not* used, consistent
-with the sequence-length constraint noted above.
+**Dataset has grown to 15 recordings** (the "4 recordings" in the Dataset section is
+superseded):
+- **7 positive** (RI1): `RI1_s1_1, s1_2, s2_3, s2_4, s3_6, s4_7, s4_8`
+- **8 negative** (RI2): `RI2_s1_1, s1_2, s2_3, s2_4, s3_5, s3_6, s4_7, s4_8`
+- Each recording tiled into the **top-10 sniffing-richest non-overlapping 30 s windows**
+  (T=1500) → **147 windows total** `(147, 1500, 1)`. Valence read from the `RIx` prefix
+  (`RI1 = 1`, `RI2 = 0`).
 
-**Valence signal (Q5):** a **suggestive descriptive signal**, not yet a certified decode.
-- Respiratory-state **switch-rate** is higher for positive than negative valence
-  (pooled 0.295 vs 0.243) and **rank-orders perfectly across all 4 recordings**
-  (positives 0.309, 0.280 > negatives 0.252, 0.234; no overlap).
-- The signal is in switching **dynamics**, not **state occupancy** (occupancy ≈ identical
-  across valence; only 2 of the 4 discrete states are ever used → effectively bistable).
-- **Leakage-free LORO decoding returned balanced-acc = 0.000** for latent `h`, switch
-  stats, and both combined. This is an **n=4 artifact** (2 recordings/class can't calibrate
-  a held-out boundary, so it flips systematically) — *not* evidence against the effect, and
-  not trustworthy in either direction at this sample size.
+**Model = supervised SRNN run in DISCOVERY mode (`coef_cross = 0`).** This is the key
+configuration choice for Q5: RI2 (negative) windows have ~0% sniffing, so a behaviorally
+supervised run (`coef_cross = 0.5`) would make any valence separation **label-driven**.
+With `coef_cross = 0` the switching states are **discovered from respiration itself**, so a
+valence signal would be a genuine discovery. (The supervised variant can be run separately
+for comparison.)
 
-**Most informative analyses (Q6), observed:** switch-rate / switch statistics were the
-discriminating feature; state-occupancy and the latent `h` (via LORO) were not, at n=4.
+**Cross-validation:** leave-one-recording-out across all 15 recordings — SLURM array
+`0–14`, one GPU per fold (`hipergator/respiration_job.slurm`, partition `hpg-b200`).
 
-**Caveat (ties to README caveat #1):** this run used `coef_cross = 0.5`, so the switch
-separation could be **label-driven** rather than discovered. The discovery-mode run
-(`coef_cross = 0`) remains the recommended primary and is still **to do**.
+**Fixed settings:** `num_tv = 4`, `hidden_shape = 8`, `bottleneck_shape = 16`,
+`neural_private_shape = 8`; 50 Hz, bandpass 0.1–20 Hz, z-scored, subject-only;
+`epochs = 2000`, `lr = 0.001`, `batch_size = 256`, `seed = 131`.
 
-**Next steps:** (1) more recordings — the only real fix for LORO power; (2) interim
-defensible statistic via window-level decode or a permutation test on per-recording
-switch-rates; (3) re-run in discovery mode (`coef_cross = 0`) and compare.
+**Which open questions this run targets:** Q1–Q3 (feasibility via windowing — full 10-min
+recordings are not used), Q5 (does latent / switching structure separate valence, now at
+n=15 instead of n=4), and Q6 (analyses on the saved `h` and `pos_test`: switch statistics,
+state-occupancy, PCA/UMAP, leakage-free LORO valence decoding via `collect_folds.py`).
 
-*Full numeric output and the operational write-up live in
-[respiration/README.md](../respiration/README.md#results--first-full-4-fold-hipergator-run-run-completed-2026-06-25).*
+*Operational details (exact recording list, launch commands, output paths) live in
+[respiration/README.md](../respiration/README.md#current-experiment-running-now--updated-2026-06-26).*
