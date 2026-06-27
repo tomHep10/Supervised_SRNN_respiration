@@ -12,12 +12,14 @@ Read the files in order if you want the full story, or jump to what you need.
 
 | File | What it covers |
 |------|----------------|
-| [01_project_layout.md](01_project_layout.md) | Every folder and file, what it is and why it exists. |
+| [00_quickstart.md](00_quickstart.md) | **Read first.** Environment, which node, how work gets run (login vs. SLURM), current status, and a one-paragraph hand-off for a new agent. |
+| [01_project_layout.md](01_project_layout.md) | Every folder and file, what it is and why it exists — including all SLURM scripts, in order of use. |
 | [02_concepts_and_math.md](02_concepts_and_math.md) | The big-picture idea and all the background terms (state-space models, HMMs, ELBO, variational inference) defined slowly. |
 | [03_model_internals.md](03_model_internals.md) | A line-by-line walk through the actual code: the generative model, the inference network, Baum–Welch, and the loss. |
 | [04_usage_guide.md](04_usage_guide.md) | How to install, run on the simulated data, train, plot, and adapt it to your own data. |
 | [05_hipergator_guide.md](05_hipergator_guide.md) | Running the model as a batch job on UF HiPerGator (SLURM); ready-to-edit job scripts in [`../hipergator/`](../hipergator/). |
-| [06_project_context.md](06_project_context.md) | The research goal (social valence from respiration), dataset, SRNN-vs-SSLD decision, and open questions. |
+| [06_project_context.md](06_project_context.md) | The research goal (social valence from respiration), dataset, SRNN-vs-SSLD decision, findings, and open questions. |
+| [07_experiment_runbook.md](07_experiment_runbook.md) | Procedural, copy-paste walkthrough of the current 15-recording experiment: prepare → train → classify → read results. |
 
 **Your respiration pipeline** lives in [`../respiration/`](../respiration/) — scripts that
 turn your raw `.h5` + BORIS `.csv` files into windows, train the SRNN, and analyze the

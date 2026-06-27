@@ -31,7 +31,7 @@ def parse_args():
     ap.add_argument("--num_tv", type=int, default=None)
     ap.add_argument("--hidden_shape", type=int, default=None)
     ap.add_argument("--coef_cross", type=float, default=None)
-    ap.add_argument("--split", choices=["recording", "window"], default=None)
+    ap.add_argument("--split", choices=["recording", "subject", "window"], default=None)
     return ap.parse_args()
 
 
@@ -44,6 +44,22 @@ def split_indices(meta, mode, fold):
         test_rec = rec_ids[fold % len(rec_ids)]
         test_idx = np.where(rid == test_rec)[0]
         train_idx = np.where(rid != test_rec)[0]
+    elif mode == "subject":
+        # leave-one-SUBJECT-out: every subject (sN) appears in both RI1 and RI2, so
+        # leave-one-recording-out leaks individual respiration signatures into the
+        # held-out recording. Holding out ALL of a subject's recordings tests whether
+        # valence generalizes ACROSS individuals. (4 subjects -> folds 0-3.)
+        import re
+        names = meta["recording_names"]
+        # subject = the FULL sX_Y token (e.g. s1_1): the trailing number is the global
+        # individual id, the leading sX is the session/pair. RIx_s1_1 in RI1 and RI2 is
+        # the SAME animal, so this holds out an individual across both valences.
+        subj_of_rec = np.array([re.search(r"(s\d+_\d+)", str(s)).group(1) for s in names])
+        subj = subj_of_rec[rid]                              # per-window subject
+        subj_ids = np.unique(subj)
+        test_subj = subj_ids[fold % len(subj_ids)]
+        test_idx = np.where(subj == test_subj)[0]
+        train_idx = np.where(subj != test_subj)[0]
     else:  # random window KFold
         from sklearn.model_selection import KFold
         kf = KFold(n_splits=5, shuffle=True, random_state=42)

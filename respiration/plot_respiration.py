@@ -33,7 +33,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="respiration/config_respiration.yaml")
     ap.add_argument("--fold", type=int, default=None)
-    ap.add_argument("--split", choices=["recording", "window"], default=None)
+    ap.add_argument("--split", choices=["recording", "subject", "window"], default=None)
     args = ap.parse_args()
     cfg = yaml.safe_load(open(args.config))
     paths = cfg["paths"]

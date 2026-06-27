@@ -1,162 +1,183 @@
 # 1. Project Layout
 
-This file is a guided tour of every folder and file in the repository, and why each
-one matters to you.
+A guided tour of every folder and file in the repository and why each one matters. The
+repo has **three layers**, and keeping them straight makes everything else clear:
+
+1. **`SRNN/`** — the model itself (the math). Imported everywhere, **never modified**.
+2. **The original simulation demo** (`array_hidden8.py`, `plot.py`, `config.yaml`,
+   `data/`) — the canned example the model shipped with; useful as a reference, not part of
+   the respiration science.
+3. **`respiration/`** — the actual research pipeline: turn raw respiration recordings into
+   windows, train the SRNN, and test it for social valence. **This is where the science
+   lives.**
+
+Plus **`hipergator/`** (SLURM job scripts to run all of the above on the cluster) and
+**`docs/`** (this documentation).
 
 ```
-Supervised_SRNN/
-├── array_hidden8.py        ← MAIN ENTRY POINT: trains the model on the data
-├── plot.py                 ← Post-training analysis & figures
-├── config.yaml             ← All knobs (hyperparameters, paths) in one place
-├── environment.yml         ← Conda environment specification
-├── README.md               ← Short install/run instructions (the official one)
+Supervised_SRNN_respiration/
 │
-├── data/                   ← Input data
-│   ├── simulation.npy       ← The neural recordings  (50, 100, 20)
-│   └── labels.npy           ← Ground-truth regime labels (50, 100, 1)
+├── docs/                         ← THIS documentation (start at 00_quickstart.md)
+│   ├── 00_quickstart.md           ← env, node, how work gets run (read first)
+│   ├── 01_project_layout.md       ← you are here
+│   ├── 02_concepts_and_math.md    ← the model's ideas + background math
+│   ├── 03_model_internals.md      ← line-by-line walk through SRNN/
+│   ├── 04_usage_guide.md          ← install / run / read outputs (sim demo)
+│   ├── 05_hipergator_guide.md     ← SLURM concepts + the original sim job scripts
+│   ├── 06_project_context.md      ← research goal, dataset, findings & decisions
+│   └── 07_experiment_runbook.md   ← step-by-step to reproduce the current experiment
 │
-├── SRNN/                   ← THE MODEL: the Python package with all the math
-│   ├── model_srnn.py        ← Generative model (emission, per-state RNNs, transitions)
-│   ├── inference_network.py ← Inference network (Transformer that reads the data)
-│   ├── baum_welch.py        ← Forward–backward algorithm over the discrete states
-│   ├── loss_function.py     ← The training objective (ELBO + supervised term)
-│   ├── train.py             ← Training loop and evaluation routine
-│   ├── initialization.py    ← Small helper: one-hot encoding of labels
-│   ├── generative_check.py  ← Optional: roll the model forward to "dream" data
-│   └── utils.py             ← Small helper: ETA / time formatting
+├── SRNN/                         ← THE MODEL (imported, never edited) — see file 03
+│   ├── model_srnn.py              ← generative model (per-state RNNs, transitions, emission)
+│   ├── inference_network.py       ← inference net RNNInfer (a Transformer that reads y → h)
+│   ├── baum_welch.py              ← forward–backward over the discrete states
+│   ├── loss_function.py           ← training objective (ELBO + supervised cross-entropy)
+│   ├── train.py                   ← training loop train_() and evaluation eval_()
+│   ├── initialization.py          ← one_hot() label helper
+│   ├── generative_check.py        ← optional: roll dynamics forward to "dream" data
+│   └── utils.py                   ← compute_time() ETA helper
 │
-├── result/                 ← Saved trained models (.pt checkpoint files)
-│   ├── sim_model_hidden8_fold0.pt
-│   └── autosave_sim_model_hidden8_fold_0.pt
+├── respiration/                  ← THE RESEARCH PIPELINE — see respiration/README.md
+│   ├── config_respiration.yaml        ← params + LOCAL paths (smoke tests)
+│   ├── config_respiration_hpg.yaml    ← params + HiPerGator paths (the real run)
+│   ├── prepare_respiration.py         ← raw .h5 + BORIS .csv → windowed arrays
+│   ├── train_respiration.py           ← train the SRNN (one CV fold per call)
+│   ├── plot_respiration.py            ← per-fold figures (recon, states, latent PCA)
+│   ├── analyze_valence.py             ← THE CLASSIFIER/ANALYSIS: valence tests across folds
+│   ├── collect_folds.py               ← old cross-fold decoder (superseded; see note)
+│   ├── data_prepared/                 ← output of prepare_ (observations/labels/meta)
+│   ├── result/                        ← trained checkpoints resp_srnn_<split>_h8_fold*.pt
+│   └── plot/                          ← analysis figures (PNGs)
 │
-└── plot/                   ← Output figures from plot.py
-    ├── neural_recon.png
-    └── states.png
+├── hipergator/                   ← SLURM JOB SCRIPTS (see "Job scripts" below, in order)
+│   ├── run_on_hpg.sh                  ← one-shot helper: build env + prepare + submit
+│   ├── respiration_job.slurm          ← TRAIN, leave-one-recording-out (GPU array 0-14)
+│   ├── respiration_job_loso.slurm     ← TRAIN, leave-one-subject-out  (GPU array 0-7)
+│   ├── analyze_job.slurm              ← ANALYZE one split (CPU)
+│   ├── classifier_results.slurm       ← ANALYZE both splits + collect_folds (CPU, one job)
+│   ├── ssrnn_job.slurm                ← (legacy) train the sim demo on GPU
+│   └── ssrnn_job_cpu.slurm            ← (legacy) train the sim demo on CPU
+│
+├── logs/                         ← SLURM logs, <jobname>_<jobid>.log
+│
+│   ── original simulation demo (reference, not the respiration science) ──
+├── array_hidden8.py              ← sim demo entry point (trains on data/simulation.npy)
+├── plot.py                       ← sim demo figures
+├── config.yaml                   ← sim demo config
+├── data/                         ← sim demo inputs (simulation.npy, labels.npy)
+├── result/                       ← sim demo checkpoints
+├── plot/                         ← sim demo figures (neural_recon.png, states.png)
+├── claude_runs/                  ← archived smoke-test run of the sim demo
+│
+├── environment.yml               ← conda spec → the SSRNN env
+├── README.md                     ← terse top-level readme
+└── .gitignore
 ```
 
 ---
 
-## Top-level files
+## `SRNN/` — the model package (do not modify)
 
-### `array_hidden8.py` — the main script you run
-This is the file you execute to train the model. The odd name comes from the
-`hidden_shape = 8` setting (the size of the continuous latent state — see file 2). It:
-
-1. Parses command-line arguments and loads `config.yaml`.
-2. Loads `data/simulation.npy` and `data/labels.npy`.
-3. Splits the 50 trials into train/test using **5-fold cross-validation** (see below).
-4. Builds the model (`model_srnn.Model`) and the inference network
-   (`inference_network.RNNInfer`).
-5. Sets up the optimizers and learning-rate schedulers.
-6. Calls `train.train_(...)` to actually train.
-7. Saves everything (weights + data + metrics) into a `.pt` file in `result/`.
-
-> **"5-fold cross-validation"** means: split the 50 trials into 5 equal groups
-> ("folds") of 10. Train on 4 groups (40 trials), test on the held-out group (10
-> trials). Do this 5 times so every trial gets used as test data once. The `--fold N`
-> argument (N = 0..4) selects *which* group is held out for testing this run.
-
-### `plot.py` — analysis after training
-Loads a saved `.pt` checkpoint, re-runs the model on the test trials, and produces two
-figures into `plot/`:
-- **`neural_recon.png`** — the model's reconstruction of the neural data vs. the truth.
-- **`states.png`** — the model's *inferred* discrete regime sequence vs. the *true* one.
-
-### `config.yaml` — your control panel
-Every tunable setting lives here so you do not have to edit code. Grouped into:
-- `experiment`: random seed, which fold, data paths, where to save.
-- `system`: `cuda` (GPU) vs `cpu`, and float precision.
-- `model`: model sizes — `num_tv` (number of discrete states), `hidden_shape`
-  (continuous latent size), plus `bottleneck_shape` and `neural_private_shape`.
-- `train`: `epochs`, learning rate `lr`, the supervised weight `coef_cross`, and `batch_size`.
-
-> **Heads-up (matters for understanding):** `bottleneck_shape` and
-> `neural_private_shape` are **read but not actually used** by the simplified model in
-> this repo. They are leftovers from a larger multi-region version of the model (the
-> commented-out `sharedecoder`, "private" vs "shared" latents in `array_hidden8.py` are
-> the other traces of it). You can ignore them; changing them changes nothing here.
-> They are documented so you are not confused when you go looking for where they're used.
-
-### `environment.yml` — the software environment
-A Conda spec that creates an environment named **`SSRNN`** with Python 3.11, PyTorch
-2.8 (CUDA 12.9 build), NumPy, scikit-learn, matplotlib, and PyYAML.
-
-### `README.md`
-The original, terse install-and-run instructions. This `docs/` folder is the expanded
-version of it.
-
----
-
-## `data/` — the inputs
-
-Both files are NumPy `.npy` arrays (NumPy's binary save format).
-
-### `simulation.npy` — the observations, shape `(50, 100, 20)`
-The convention throughout the code is **(trials, time, features)**:
-- **50 trials** — independent repetitions of the experiment (think: 50 recording runs).
-- **100 time points** — the length of each trial.
-- **20 features** — the 20 simulated "neurons" (channels) recorded at each time point.
-
-In the code this array is called `y_c` and later `y_train` / `y_test`. This is the
-data the model tries to explain and reconstruct.
-
-### `labels.npy` — the ground-truth regimes, shape `(50, 100, 1)`
-For every trial and every time point, an integer saying which discrete regime the
-system was *truly* in. Here the values are `{0, 1}` — i.e. **2 states**, matching
-`num_tv: 2` in the config. The trailing `1` is just a singleton dimension.
-
-These labels are what make the training **supervised**: most switching models have to
-*guess* the regimes; this one is shown the answers and rewarded for matching them.
-
----
-
-## `SRNN/` — the model package
-
-This is the heart of the project. Each file is dissected in
-[03_model_internals.md](03_model_internals.md); here is the one-line role of each:
+The heart of the project; each file is dissected in
+[03_model_internals.md](03_model_internals.md). One-line roles:
 
 | File | Role |
 |------|------|
-| `model_srnn.py` | The **generative model**: the per-state RNNs, the transition network, the emission MLP, and the loop that produces all the per-timestep probabilities. |
-| `inference_network.py` | The **inference network** `RNNInfer` — a Transformer encoder that reads `y` and outputs an estimate of the continuous hidden state `h`. (Note: named "RNN" but it is actually a Transformer.) |
-| `baum_welch.py` | The **forward–backward / Baum–Welch** algorithm — exact probability bookkeeping over the discrete states. |
-| `loss_function.py` | Builds the **training objective** from the Baum–Welch outputs plus the supervised cross-entropy. |
-| `train.py` | The **training loop** (`train_`) and the **evaluation** routine (`eval_`). |
-| `initialization.py` | `one_hot(...)` — converts integer labels into one-hot vectors for the cross-entropy term. |
-| `generative_check.py` | Optional sanity check: runs the learned dynamics *forward* to generate ("dream") new data — a way to inspect what the model has learned. |
-| `utils.py` | `compute_time(...)` — prints an estimated time-remaining during training. |
+| `model_srnn.py` | **Generative model:** per-state RNNs, transition network, emission MLP, the per-timestep probability loop. |
+| `inference_network.py` | **Inference network** `RNNInfer` — a Transformer encoder reading `y` → estimate of continuous hidden state `h`. (Named "RNN" but it's a Transformer.) |
+| `baum_welch.py` | **Forward–backward / Baum–Welch** — exact probability bookkeeping over discrete states. |
+| `loss_function.py` | Builds the **objective** from Baum–Welch outputs + supervised cross-entropy. |
+| `train.py` | **Training loop** `train_()` and **evaluation** `eval_()`. |
+| `initialization.py` | `one_hot()` — integer labels → one-hot for the cross-entropy term. |
+| `generative_check.py` | Optional sanity check: run dynamics forward to generate data. |
+| `utils.py` | `compute_time()` — time-remaining estimate during training. |
 
-> **`__pycache__/`** is just Python's compiled-bytecode cache. Ignore it; it is
-> regenerated automatically.
-
----
-
-## `result/` — trained model checkpoints
-
-PyTorch `.pt` files (saved with `torch.save`). Each is a dictionary holding the trained
-weights **and** the data/metrics needed to reproduce the analysis. Two kinds appear:
-
-- **`sim_model_hidden8_fold0.pt`** — the *final* checkpoint written at the end of a run
-  (by `array_hidden8.py`). This is the one `plot.py` loads by default.
-- **`autosave_sim_model_hidden8_fold_0.pt`** — an *every-epoch* autosave written by the
-  training loop (`train.py`), so a crashed run is recoverable. Same contents, saved
-  continuously.
-
-The filename encodes the settings: `sim` (the `save_name`), `hidden8` (`hidden_shape=8`),
-`fold0` (the cross-validation fold).
-
-What's inside a checkpoint (keys you can load): `model_state_dict`,
-`rnninfer_state_dict` (the two networks' weights), the train/test data arrays,
-`label_test`, training-curve arrays (`loss_train`, `mse_all*`, `error_all*`), and
-`pos_test_all` (the inferred-state posterior at every epoch). See file 4 for how to read these.
+> **Why "supervised":** unlike usual switching models it can be shown ground-truth regime
+> labels and pushed to match them (weight `coef_cross`). With `coef_cross = 0` it becomes
+> effectively unsupervised — the mode the respiration experiment uses (see file 06).
 
 ---
 
-## `plot/` — output figures
+## `respiration/` — the research pipeline
 
-Where `plot.py` writes its PNGs.
-- **`neural_recon.png`** — top half = true neural activity for the best-reconstructed
-  test trial; bottom half = the model's reconstruction. They should look alike if
-  training worked.
-- **`states.png`** — top = true regime sequence per trial; bottom = the regime sequence
-  the model inferred. Agreement here is the main "did the supervised switching work?" check.
+This is the code you actually run for the science. Order of use matches the pipeline:
+
+| File | Role | When you run it |
+|------|------|-----------------|
+| `config_respiration_hpg.yaml` | All params + **HiPerGator** data paths, the recording list (15), valence map, windowing, model sizes, training knobs. | Edit to change the experiment; passed as `--config` to every script. |
+| `config_respiration.yaml` | Same but **local** paths, for small smoke tests off-cluster. | Local debugging only. |
+| `prepare_respiration.py` | Clean + window raw `.h5` + BORIS `.csv` → `data_prepared/`. | **Once**, before training (Step 1 of the runbook). |
+| `train_respiration.py` | Train the SRNN for **one** CV fold. Args: `--fold`, `--split {recording,subject,window}`, plus optional `--epochs/--num_tv/--hidden_shape/--coef_cross`. | Called by the training SLURM arrays, once per fold. |
+| `plot_respiration.py` | Per-fold figures (resp reconstruction, inferred states, latent PCA). Args `--fold`, `--split`. | Right after each training fold (the SLURM scripts call it automatically). |
+| `analyze_valence.py` | **The classifier / valence analysis.** Pools the held-out folds and runs: (A) recording-level breathing-rate ROC-AUC, (B) pooled latent PCA, (C) rate-controlled decode with LORO **and** LOSO grouping, (D) permutation test, (E) LOSO LDA projection. Args `--split {recording,subject}`, `--pca_fold`, `--n_perm`. | After all folds train (Step 3); via `analyze_job.slurm` / `classifier_results.slurm`. |
+| `collect_folds.py` | Older cross-fold logistic-regression decoder. **Superseded** — it pools latents from separately-trained folds whose coordinate systems aren't aligned, so its numbers are untrustworthy. Kept for provenance. | Don't rely on it; use `analyze_valence.py`. |
+
+**Sub-folders:**
+- `data_prepared/` — output of `prepare_respiration.py`: `observations.npy`
+  `(147,1500,1)`, `labels.npy`, `meta.npz` (recording/subject/valence per window),
+  `label_map.json`.
+- `result/` — trained checkpoints, named `resp_srnn_<split>_h8_fold<k>.pt` (e.g.
+  `resp_srnn_recording_h8_fold0.pt`, `resp_srnn_subject_h8_fold3.pt`), plus per-fold
+  `progress_<split>_fold<k>.csv` training curves.
+- `plot/` — analysis figures: `permutation_test_{recording,subject}.png`,
+  `lda_projection_{recording,subject}.png`, `pooled_latent_pca_by_valence.png`, and the
+  per-fold `resp_recon.png` / `states.png` / `latent_pca.png` (these overwrite across
+  folds — they show the last fold to run).
+
+See [respiration/README.md](../respiration/README.md) for the data design and scientific
+caveats, and [07_experiment_runbook.md](07_experiment_runbook.md) to run it end to end.
+
+---
+
+## `hipergator/` — the SLURM job scripts (in order of use)
+
+All cluster runs go through these. They are grouped by the pipeline stage. Cluster
+coordinates baked into the respiration scripts: account/qos `npadillacoreano`, GPU
+partition `hpg-b200`, CPU partition `hpg-default` (see [00_quickstart.md](00_quickstart.md)).
+
+| # | Script | Stage | GPU? | What it does / when to use |
+|---|--------|-------|------|----------------------------|
+| 0 | `run_on_hpg.sh` | setup | — | **Convenience one-shot** (not a SLURM file — `bash` it in your own SSH session). Builds the `SSRNN` env if missing, runs `prepare_respiration.py`, auto-detects your account, and submits the recording-out training array. Use it for a clean first run; afterwards prefer the individual steps. |
+| 1 | `respiration_job.slurm` | **train** | ✅ `hpg-b200` | **Primary training.** SLURM array `0-14` — one model per fold, leave-one-**recording**-out, `coef_cross=0` (discovery). Runs `train_respiration.py` then `plot_respiration.py` per fold. → `resp_srnn_recording_h8_fold{0..14}.pt`. Submit after `data_prepared/` exists. |
+| 2 | `respiration_job_loso.slurm` | **train** | ✅ `hpg-b200` | **Control training.** SLURM array `0-7` — leave-one-**subject**-out (holds out *all* of one animal's recordings). The clean test of cross-individual generalization (see file 06, finding #4). → `resp_srnn_subject_h8_fold{0..7}.pt`. |
+| 3 | `analyze_job.slurm` | **analyze** | ❌ `hpg-default` | Runs `analyze_valence.py` for **one** split. Default `recording`; pass `subject` as an arg (`sbatch hipergator/analyze_job.slurm subject`). Inference-only, minutes. Produces the valence numbers + figures. |
+| 4 | `classifier_results.slurm` | **analyze** | ❌ `hpg-default` | **All-in-one results job.** Runs `collect_folds.py` (for provenance) and `analyze_valence.py` for **both** splits in a single submission. The easiest way to refresh every result/figure at once. |
+| — | `ssrnn_job.slurm` | legacy | ✅ | Trains the **original simulation demo** (`array_hidden8.py`), 5-fold array. Template/reference; has `GROUP/QOS/GPU_TYPE` placeholders, not the respiration run. |
+| — | `ssrnn_job_cpu.slurm` | legacy | ❌ | Same demo, CPU-only. Reference. |
+
+Typical flow: **1 → 2 → 4** (or **3** for a single split). The runbook
+([07_experiment_runbook.md](07_experiment_runbook.md)) walks each one.
+
+---
+
+## The original simulation demo (reference only)
+
+These are the files the SRNN repo shipped with — a canned 2-state, 20-"neuron" simulation.
+They're **not** the respiration science, but they're the cleanest example of the model and
+are documented fully in [04_usage_guide.md](04_usage_guide.md).
+
+| File / folder | Role |
+|---|---|
+| `array_hidden8.py` | Entry point: trains the model on `data/simulation.npy` with 5-fold CV (`--fold 0..4`). Name comes from `hidden_shape=8`. |
+| `plot.py` | Loads a checkpoint, writes `plot/neural_recon.png` (reconstruction vs. truth) and `plot/states.png` (inferred vs. true regimes). |
+| `config.yaml` | The demo's knobs (seed, fold, paths, model sizes, training). |
+| `data/simulation.npy` | Observations `(50, 100, 20)` = (trials, time, neurons). |
+| `data/labels.npy` | Ground-truth regimes `(50, 100, 1)`, values `{0,1}`. |
+| `result/` | Demo checkpoints (`sim_model_hidden8_fold0.pt`, autosave). |
+| `plot/` | Demo figures. |
+| `claude_runs/` | An archived CPU smoke-test of the demo (its own config/plot/result/log) — proof the pipeline runs end-to-end. |
+
+> **Note on `bottleneck_shape` / `neural_private_shape`:** present in the configs but
+> **read and not used** by this simplified model — leftovers from a larger multi-region
+> version. Changing them changes nothing. Documented so they don't confuse you.
+
+---
+
+## Top-level support files
+
+- **`environment.yml`** — conda spec that creates the **`SSRNN`** env (Python 3.11,
+  PyTorch 2.8 / CUDA 12.9, numpy, scikit-learn, matplotlib, pyyaml). Already built at
+  `/blue/npadillacoreano/t.heeps/.conda/envs/SSRNN` — see [00_quickstart.md](00_quickstart.md).
+- **`README.md`** — terse top-level pointer; this `docs/` folder is the expanded version.
+- **`logs/`** — every SLURM job writes `<jobname>_<jobid>.log` here.
+- **`__pycache__/`** — Python bytecode cache; ignore, auto-regenerated.
