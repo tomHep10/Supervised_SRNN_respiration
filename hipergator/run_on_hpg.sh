@@ -20,7 +20,7 @@ if ! conda env list | grep -qw SSRNN; then
 fi
 conda activate SSRNN
 
-echo ">> preparing windows (4 chosen recordings -> 40x 30s windows)..."
+echo ">> preparing windows (recordings from config -> 30s windows)..."
 python respiration/prepare_respiration.py --config "$CFG"
 
 echo ""

@@ -49,6 +49,14 @@ preprocess:
   bandpass_order: 2           # nk.signal_filter butterworth order
   zscore: true               # z-score the cleaned respiration per recording (model conditioning)
   subject_only: true         # use only BORIS rows where Subject == 'subject'
+  # --- dead-signal removal: drop flat/low-amplitude noisy stretches BEFORE windowing ---
+  remove_dead_signal: true   # detect + exclude "dead" respiration (flat, mostly noise)
+  dead_win_sec: 1.0          # rolling window (s) for local amplitude (std)
+  dead_ref_pct: 75.0         # percentile of local std used as "typical active amplitude" (robust to dead-heavy recs)
+  dead_rel_thresh: 0.25      # dead if local std < this fraction of that reference (data-tuned; see docs)
+  dead_abs_thresh: 0.0       # also dead if local std < this absolute value (z-scored units; 0 = off)
+  dead_min_sec: 2.0          # ignore dead runs shorter than this (s) (don't nick brief between-breath dips)
+  max_window_dead_frac: 0.20 # never keep a window with more than this fraction of dead samples
   # Behavior -> discrete state id. 0 = nonsocial/other. ONLY the 3 sniff types are
   # modeled; posturing/chasing/fighting are disregarded (fall to 0).
   behavior_states:

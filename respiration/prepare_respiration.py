@@ -26,6 +26,7 @@ import h5py
 import pandas as pd
 import yaml
 from scipy.signal import butter, filtfilt, resample_poly, sosfiltfilt
+from scipy.ndimage import uniform_filter1d
 
 
 def rec_key(fname):
@@ -71,6 +72,42 @@ def read_bouts(csv_path, subject_only):
     return df
 
 
+def _remove_short_runs(mask, min_len):
+    """Set any True-run shorter than min_len samples back to False."""
+    mask = mask.astype(bool).copy()
+    padded = np.concatenate(([0], mask.astype(np.int8), [0]))
+    edges = np.flatnonzero(np.diff(padded))          # alternating run starts/ends
+    for s, e in zip(edges[0::2], edges[1::2]):
+        if e - s < min_len:
+            mask[s:e] = False
+    return mask
+
+
+def dead_signal_mask(resp, fs, win_sec, rel_thresh, abs_thresh, min_sec, ref_pct=75.0):
+    """Boolean mask (len == len(resp)) marking 'dead' respiration: stretches whose local
+    amplitude is far below the recording's typical amplitude (flat / low-amplitude noise
+    that still carries faint resp-like wiggles). Local amplitude = rolling std over a
+    win_sec window. The reference "typical active amplitude" is the ref_pct-th percentile
+    of that local std (p75 by default, NOT the median: a recording that is itself heavily
+    dead drags its median down, which would shrink the threshold and under-flag the worst
+    recordings -- a high percentile is robust to that). A sample is dead if its local std
+    falls below rel_thresh * reference, or below abs_thresh outright (z-scored units, if
+    set). Dead runs shorter than min_sec are ignored so brief between-breath dips survive.
+
+    NB measured on this dataset the local-std distribution is unimodal (dead signal is a
+    ~1-5% low tail), so bimodal auto-thresholds (Otsu/GMM) fail -- they split the active
+    distribution in half and flag ~50%. A robust percentile-relative cut is the right tool."""
+    w = max(1, int(round(win_sec * fs)))
+    local_mean = uniform_filter1d(resp, w, mode="nearest")
+    local_var = uniform_filter1d(resp * resp, w, mode="nearest") - local_mean ** 2
+    local_std = np.sqrt(np.clip(local_var, 0.0, None))
+    ref = np.percentile(local_std, ref_pct)           # robust "typical active" amplitude
+    dead = local_std < rel_thresh * ref
+    if abs_thresh > 0:
+        dead |= local_std < abs_thresh
+    return _remove_short_runs(dead, max(1, int(round(min_sec * fs))))
+
+
 def rasterize(df, n, fs, behavior_states):
     labels = np.zeros(n, dtype=np.int64)
     for _, r in df.iterrows():
@@ -95,8 +132,12 @@ def main():
     N = int(W["windows_per_recording"])
     os.makedirs(paths["out_dir"], exist_ok=True)
 
-    obs_all, lab_all, val_all, rid_all, names, starts_all = [], [], [], [], [], []
-    print(f"window T={T} ({W['window_sec']}s)  keep top {N} sniffing-richest per recording\n" + "=" * 70)
+    rm_dead = P.get("remove_dead_signal", True)
+    max_dead = float(P.get("max_window_dead_frac", 0.20))
+
+    obs_all, lab_all, val_all, rid_all, names, starts_all, dead_all = [], [], [], [], [], [], []
+    print(f"window T={T} ({W['window_sec']}s)  keep top {N} sniffing-richest per recording"
+          f"{'  | dead-signal removal ON' if rm_dead else ''}\n" + "=" * 70)
     for rid, stem in enumerate(cfg["recordings"]):
         h5p = find_one(paths["h5_dir"], stem, ".h5")
         csvp = find_one(paths["csv_dir"], stem, ".csv")
@@ -108,19 +149,34 @@ def main():
             resp = (resp - resp.mean()) / (resp.std() + 1e-8)
         M = resp.shape[0]
         labels = rasterize(read_bouts(csvp, P.get("subject_only", True)), M, fs_t, P["behavior_states"])
+
+        # mark flat/dead respiration BEFORE windowing. Dead stretches are not behavior
+        # (whatever BORIS labeled), so zero their labels; and they must not be picked as
+        # "sniffing-rich" windows, so forbid windows dominated by dead signal below.
+        if rm_dead:
+            dead = dead_signal_mask(resp, fs_t, P.get("dead_win_sec", 1.0),
+                                    P.get("dead_rel_thresh", 0.25), P.get("dead_abs_thresh", 0.0),
+                                    P.get("dead_min_sec", 2.0), P.get("dead_ref_pct", 75.0))
+            labels[dead] = 0
+        else:
+            dead = np.zeros(M, dtype=bool)
         sniff = (labels > 0).astype(np.float64)        # sniffing = any of the 3 sniff states
 
-        # tile into NON-OVERLAPPING contiguous windows, score each by sniffing fraction
+        # tile into NON-OVERLAPPING contiguous windows; drop windows that are mostly dead,
+        # then score the rest by sniffing fraction
         starts = list(range(0, M - T + 1, T))
-        scored = sorted(starts, key=lambda s: sniff[s:s + T].mean(), reverse=True)
+        clean = [s for s in starts if dead[s:s + T].mean() <= max_dead]
+        scored = sorted(clean, key=lambda s: sniff[s:s + T].mean(), reverse=True)
         keep = sorted(scored[:N])                      # top-N, restored to chronological order
         for s in keep:
             obs_all.append(resp[s:s + T, None]); lab_all.append(labels[s:s + T, None])
             val_all.append(valence); rid_all.append(rid); starts_all.append(s)
+            dead_all.append(float(dead[s:s + T].mean()))
         names.append(stem)
         fr = [f"{100*sniff[s:s+T].mean():.0f}%" for s in keep]
         print(f"{stem}: trial={trial} val={valence} dur={len(raw)/fs:.0f}s -> {M} samp | "
-              f"{len(starts)} candidate windows, kept {len(keep)} | sniff% per kept: {fr}")
+              f"{len(starts)} cand, {len(starts)-len(clean)} dropped(dead), kept {len(keep)} | "
+              f"dead {100*dead.mean():.0f}% of rec | sniff% per kept: {fr}")
 
     observations = np.asarray(obs_all, dtype=np.float32)
     labels_arr = np.asarray(lab_all, dtype=np.int64)
@@ -129,7 +185,8 @@ def main():
     np.save(os.path.join(paths["out_dir"], "observations.npy"), observations)
     np.save(os.path.join(paths["out_dir"], "labels.npy"), labels_arr)
     np.savez(os.path.join(paths["out_dir"], "meta.npz"), valence=valence_arr, recording_id=rid_arr,
-             recording_names=np.array(names), target_fs=fs_t, T=T, window_starts=np.array(starts_all))
+             recording_names=np.array(names), target_fs=fs_t, T=T, window_starts=np.array(starts_all),
+             window_dead_frac=np.array(dead_all, dtype=np.float32))
     json.dump(P["behavior_states"], open(os.path.join(paths["out_dir"], "label_map.json"), "w"), indent=2)
     print("=" * 70)
     print(f"observations {observations.shape}  labels {labels_arr.shape}")

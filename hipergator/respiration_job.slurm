@@ -17,7 +17,7 @@
 #   python respiration/collect_folds.py --config respiration/config_respiration_hpg.yaml
 # =============================================================================
 #SBATCH --job-name=resp-srnn
-#SBATCH --output=logs/resp_fold%a_%j.log
+#SBATCH --output=logs/resp_fold%a_%A.log    # %A = array-master id (shared across tasks); %a = fold
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=t.heeps@ufl.edu
 #SBATCH --account=npadillacoreano          # verify with sacctmgr (your blue dir => npadillacoreano)

@@ -43,6 +43,46 @@ from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 
 
 def load_ckpt(path, h, device):
+    """
+    Loads a previously saved model checkpoint and prepares the model and inference network for use.
+
+    What is a checkpoint?
+    ---------------------
+    In deep learning, a "checkpoint" is a file that saves all the important information about a model at a certain point during or after training. This allows you to later reload the model exactly as it was, without retraining from scratch. The checkpoint usually stores things like learned weights, model configuration, and sometimes the optimizer state.
+
+    Line-by-line explanation:
+    -------------------------
+    - ck = torch.load(path, weights_only=False, map_location=device)
+        # Loads the checkpoint file from disk ("path" specifies the file). This file contains saved data, typically a Python dictionary.
+        # "weights_only=False" means it loads everything saved (not just the model's raw numbers/weights).
+        # "map_location=device" will place the loaded data on the specified device (e.g., 'cpu' or 'cuda' for GPU).
+        # After this, "ck" is a dictionary with keys and values for the model and training state.
+
+    - model = model_srnn.Model(ck["D"], ck["num_tv"], h, ck["neural_private_shape"]).to(device)
+        # Here, we create a new instance of the model architecture (called "model_srnn.Model").
+        # ck["D"]: The input dimension of the data (number of features per timepoint).
+        # ck["num_tv"]: How many "states" the model has for switching (often discrete behavioral or neural states).
+        # h: The size of the hidden layer we want (passed as an argument to this function).
+        # ck["neural_private_shape"]: Additional model parameter for internal representation (specific to architecture).
+        # .to(device) moves the model to the specified hardware device (CPU or GPU).
+
+    - rnninfer = inference_network.RNNInfer(ck["D"], h).to(device)
+        # Builds a related "inference network" that helps the model make predictions about the hidden states.
+        # Takes the input dimension and hidden size as arguments, then moves it to the same hardware device.
+
+    - model.load_state_dict(ck["model_state_dict"])
+        # Loads the saved weights/parameters into the model -- these are the numbers the model has learned, 
+        # so it behaves identically to when it was trained.
+
+    - rnninfer.load_state_dict(ck["rnninfer_state_dict"])
+        # Loads the saved weights/parameters for the inference network.
+
+    - return ck, model, rnninfer
+        # Returns:
+        #   ck:        The full checkpoint dictionary, in case you need other saved info.
+        #   model:     The reconstituted model, ready for inference or evaluation.
+        #   rnninfer:  The reconstituted inference network, also ready for use.
+    """
     ck = torch.load(path, weights_only=False, map_location=device)
     model = model_srnn.Model(ck["D"], ck["num_tv"], h, ck["neural_private_shape"]).to(device)
     rnninfer = inference_network.RNNInfer(ck["D"], h).to(device)
@@ -65,11 +105,11 @@ def per_window_mean_latent(rnninfer, y):
     return mean_out.cpu().numpy().mean(axis=1)            # (n,h)
 
 
-def loro_decode(X, y, groups, residualize=None):
-    """Leave-one-recording-out balanced accuracy for valence.
+def logo_decode(X, y, groups, residualize=None):
+    """Leave-one-group-out balanced accuracy for valence.
     If `residualize` (a 1-D per-window covariate, e.g. switch/breathing rate) is
     given, it is linearly regressed OUT of X within each split -- fit on the train
-    recordings, applied to the held-out one -- so the decode uses only the part of
+    groups, applied to the held-out one -- so the decode uses only the part of
     the latent NOT explained by rate. Standardization is likewise fit on train only.
     """
     X = np.asarray(X, dtype=float)
@@ -98,7 +138,7 @@ def permutation_test(X, val_window, rid_window, groups, n_perm, seed, residualiz
     recomputes the same LOSO balanced accuracy. Shuffling per-window instead would
     give a falsely narrow null. Returns (observed, null_array, p_value).
     """
-    obs = loro_decode(X, val_window, groups, residualize=residualize)
+    obs = logo_decode(X, val_window, groups, residualize=residualize)
     recs = np.unique(rid_window)
     rec_val = np.array([val_window[rid_window == r][0] for r in recs])   # one label per recording
     rng = np.random.RandomState(seed)
@@ -106,7 +146,7 @@ def permutation_test(X, val_window, rid_window, groups, n_perm, seed, residualiz
     for i in range(n_perm):
         mapping = dict(zip(recs, rng.permutation(rec_val)))
         y_perm = np.array([mapping[r] for r in rid_window])
-        null[i] = loro_decode(X, y_perm, groups, residualize=residualize)
+        null[i] = logo_decode(X, y_perm, groups, residualize=residualize)
     p = (1.0 + np.sum(null >= obs)) / (1.0 + n_perm)                     # one-sided, +1 smoothing
     return obs, null, p
 
@@ -243,8 +283,8 @@ def main():
         for label, X, resid in [("1. rate only (switch rate)", swr_all, None),
                                  ("2. full latent h", lat, None),
                                  ("3. latent h, RATE regressed out", lat, swr_all)]:
-            a_rec  = loro_decode(X, valence, rid_all,  residualize=resid)
-            a_subj = loro_decode(X, valence, subj_all, residualize=resid)
+            a_rec  = logo_decode(X, valence, rid_all,  residualize=resid)
+            a_subj = logo_decode(X, valence, subj_all, residualize=resid)
             print(f"  {label:34s} {a_rec:16.3f} {a_subj:15.3f}")
         print(f"  (chance=0.5; LOSO uses only n={n_subj} subject groups -> coarse, treat as pilot)")
         print("  read the LOSO column: if it collapses to ~chance, the apparent signal was")
