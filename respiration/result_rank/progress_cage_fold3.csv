@@ -1,0 +1,2 @@
+epoch,loss,test_mse,elapsed_s,eta_s
+0,797345792.0,1.089583,9,18913

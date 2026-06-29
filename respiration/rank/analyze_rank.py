@@ -1,0 +1,205 @@
+"""
+analyze_rank.py  (created by Claude)  — RANK / cagemate analysis
+
+The rank analogue of valence/analyze_valence.py. Same leakage-aware analyses, but the
+target is RANK (Dominant/Subordinate) and the leave-one-group-out unit is the CAGE
+(animals interact only with cagemates, so holding out a whole cage is the leakage-free
+test). Reuses the shared, target-agnostic helpers in ../srnn_analysis.py.
+
+  (A) RECORDING-LEVEL breathing rate -> rank (leakage-free: each recording is scored by
+      the fold that HELD ITS CAGE OUT).  breathing_Hz = switch_rate * fs / 2.
+      For valence breathing rate was a perfect confound; for rank we simply report whether
+      it carries any rank signal.
+  (B) POOLED LATENT PCA through ONE model, colored by rank (descriptive geometry).
+  (C) RANK SIGNAL BEYOND BREATHING RATE: leave-one-CAGE-out decode of rate / full latent /
+      rate-removed latent.
+  (D) PERMUTATION TEST (LOCO-by-cage), labels shuffled at the recording level.
+  (E) LDA projection (leave-one-cage-out, leakage-aware).
+
+CPU only, inference only. Run via hipergator/analyze_rank.slurm, or:
+    python respiration/rank/analyze_rank.py --config respiration/rank/config_rank_hpg.yaml
+"""
+import os, sys, glob, re, argparse
+import numpy as np
+import yaml
+import torch
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # respiration/ (for srnn_analysis)
+from srnn_analysis import (load_ckpt, per_window_switch_rate, per_window_mean_latent,
+                           logo_decode, permutation_test, logo_lda_scores)
+from sklearn.decomposition import PCA
+from sklearn.metrics import roc_auc_score
+
+DOM, SUB = "#b2182b", "#2166ac"          # Dominant / Subordinate colors
+RANK_HI, RANK_LO = "Dominant", "Subordinate"   # label 1 / label 0
+
+
+def cage_of(names):
+    """Per-recording cage = the leading index of the sCAGE_ANIMAL token (e.g. 's1_2' -> '1')."""
+    return np.array([re.search(r"s(\d+)_\d+", str(s)).group(1) for s in names])
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--config", default="respiration/rank/config_rank_hpg.yaml")
+    ap.add_argument("--split", choices=["cage"], default="cage",
+                    help="only 'cage' (leave-one-cage-out) is supported: cagemates interact "
+                         "only with each other, so a held-out recording whose cagemate is in "
+                         "training leaks; holding out a whole cage is the leakage-free test.")
+    ap.add_argument("--pca_fold", type=int, default=0,
+                    help="which fold's trained model to use for the pooled PCA")
+    ap.add_argument("--n_perm", type=int, default=1000,
+                    help="label shuffles for the permutation test (part D); 0 to skip")
+    args = ap.parse_args()
+    cfg = yaml.safe_load(open(args.config))
+    paths = cfg["paths"]; h = int(cfg["model"]["hidden_shape"])
+    fs = int(cfg["preprocess"]["target_fs"])
+    device = torch.device("cpu")
+
+    ckpts = sorted(glob.glob(os.path.join(paths["save_dir"], f"resp_srnn_{args.split}_h{h}_fold*.pt")),
+                   key=lambda p: int(re.search(r"fold(\d+)", p).group(1)))
+    print(f"analyzing split='{args.split}': found {len(ckpts)} fold checkpoints\n")
+    if not ckpts:
+        print(f"No 'resp_srnn_{args.split}_h{h}_fold*.pt' checkpoints in {paths['save_dir']}.")
+        print("Train them first: sbatch hipergator/rank_job_loco.slurm")
+        return
+
+    # ----------------- (A) leakage-free recording-level breathing rate -> rank -----------------
+    print("=" * 72)
+    print(f"(A) RECORDING-LEVEL breathing rate  (leakage-free: each recording scored by the")
+    print(f"    fold that held ITS CAGE out; split='{args.split}').  breathing_Hz = switch_rate*fs/2  (fs={fs})")
+    print("=" * 72)
+    rows = []  # (name, rank, n_windows, mean_switch_rate, breathing_hz)
+    for ckpt in ckpts:
+        ck, model, rnninfer = load_ckpt(ckpt, h, device)
+        y = torch.tensor(ck["y_test"], dtype=torch.float32, device=device)
+        sr = per_window_switch_rate(model, rnninfer, y, device)        # per-window
+        names = np.asarray(ck["recording_names"]); rid = np.asarray(ck["recording_id_test"])
+        rk = np.asarray(ck.get("rank_test", ck.get("target_test")))
+        for r in np.unique(rid):                                       # group held-out windows by recording
+            m = rid == r
+            rows.append((str(names[r]), int(rk[m][0]), int(m.sum()),
+                         float(sr[m].mean()), float(sr[m].mean() * fs / 2)))
+
+    rows.sort(key=lambda r: (-r[1], r[0]))                # Dominant first, then by name
+    print(f"\n  {'recording':30s} {'rank':12s} {'n_win':>5s} {'switch_rate':>12s} {'breathing_Hz':>13s}")
+    for name, rk, nw, srm, hz in rows:
+        print(f"  {name:30s} {RANK_HI if rk==1 else RANK_LO:12s} {nw:5d} {srm:12.3f} {hz:13.2f}")
+
+    rk_arr = np.array([r[1] for r in rows]); hz_arr = np.array([r[4] for r in rows])
+    if len(np.unique(rk_arr)) == 2:
+        dom, sub = hz_arr[rk_arr == 1], hz_arr[rk_arr == 0]
+        auc = roc_auc_score(rk_arr, hz_arr)
+        print(f"\n  Dominant    breathing_Hz: mean={dom.mean():.2f}  range=[{dom.min():.2f}, {dom.max():.2f}]")
+        print(f"  Subordinate breathing_Hz: mean={sub.mean():.2f}  range=[{sub.min():.2f}, {sub.max():.2f}]")
+        print(f"  ROC-AUC (breathing rate -> rank, n={len(rows)} recordings) = {auc:.3f}")
+        print("  (0.5 = rate carries no rank signal; n is small -> suggestive pilot, not significance)")
+
+    # ----------------- (B) pooled latent PCA through ONE model, colored by rank -----------------
+    print("\n" + "=" * 72)
+    print(f"(B) POOLED LATENT PCA -- all recordings through the fold-{args.pca_fold} model")
+    print("=" * 72)
+    obs = np.load(os.path.join(paths["out_dir"], "observations.npy"))
+    meta = np.load(os.path.join(paths["out_dir"], "meta.npz"), allow_pickle=True)
+    rank = np.asarray(meta["rank"]); rid_all = np.asarray(meta["recording_id"])
+    rec_names = np.asarray(meta["recording_names"])
+    cage_all = cage_of(rec_names)[rid_all]                 # per-window cage id
+    y_all = torch.tensor(obs, dtype=torch.float32, device=device)
+
+    pca_ckpt = os.path.join(paths["save_dir"], f"resp_srnn_{args.split}_h{h}_fold{args.pca_fold}.pt")
+    _, model, rnninfer = load_ckpt(pca_ckpt, h, device)
+    lat = per_window_mean_latent(rnninfer, y_all)         # (n_windows, h)
+    pcs = PCA(n_components=2).fit_transform(lat)
+
+    os.makedirs(paths["plot_dir"], exist_ok=True)
+    fig, ax = plt.subplots(figsize=(6, 5))
+    for v, c, lbl in [(1, DOM, RANK_HI), (0, SUB, RANK_LO)]:
+        m = rank == v
+        ax.scatter(pcs[m, 0], pcs[m, 1], s=45, alpha=0.75, color=c, label=lbl,
+                   edgecolor="k", linewidth=0.3)
+    ax.set_title(f"Pooled latent PCA (per-window mean h, fold-{args.pca_fold} model)\n"
+                 "one coordinate system; color = rank")
+    ax.set_xlabel("PC1"); ax.set_ylabel("PC2"); ax.legend()
+    out_png = os.path.join(paths["plot_dir"], "pooled_latent_pca_by_rank.png")
+    plt.tight_layout(); plt.savefig(out_png, dpi=150); plt.close()
+    print(f"  saved -> {out_png}")
+    print(f"  {len(rank)} windows: {int((rank==1).sum())} Dominant / {int((rank==0).sum())} Subordinate")
+
+    # ----------------- (C) is there rank signal BEYOND breathing rate? -----------------
+    if len(np.unique(rank)) == 2:
+        print("\n" + "=" * 72)
+        print("(C) RANK SIGNAL BEYOND BREATHING RATE")
+        print(f"    leave-one-cage-out decoding; PCA/latent model = fold-{args.pca_fold}")
+        print("=" * 72)
+        swr_all = per_window_switch_rate(model, rnninfer, y_all, device)   # rate proxy, same model
+        n_cage = len(np.unique(cage_all))
+        print(f"  {'feature':34s} {'LOCO(cage)':>12s}")
+        for label, X, resid in [("1. rate only (switch rate)", swr_all, None),
+                                 ("2. full latent h", lat, None),
+                                 ("3. latent h, RATE regressed out", lat, swr_all)]:
+            a = logo_decode(X, rank, cage_all, residualize=resid)
+            print(f"  {label:34s} {a:12.3f}")
+        print(f"  (chance=0.5; LOCO uses only n={n_cage} cage groups -> coarse, treat as pilot)")
+        print("  if the rate-removed latent (row 3) collapses to ~chance, any apparent signal")
+        print("  was rate/identity leakage, not rank that generalizes across cages.")
+
+        # ----------------- (D) permutation test (LOCO-by-cage) -----------------
+        if args.n_perm > 0:
+            print("\n" + "=" * 72)
+            print(f"(D) PERMUTATION TEST  (LOCO-by-cage; n_perm={args.n_perm}, "
+                  "labels shuffled at recording level)")
+            print("=" * 72)
+            tests = [("full latent h", lat, None),
+                     ("latent h, rate removed", lat, swr_all)]
+            fig, axes = plt.subplots(1, len(tests), figsize=(5 * len(tests), 4), squeeze=False)
+            for ax, (name, X, resid) in zip(axes[0], tests):
+                obs_acc, null, p = permutation_test(X, rank, rid_all, cage_all,
+                                                    args.n_perm, seed=131, residualize=resid)
+                ax.hist(null, bins=30, color="#bbbbbb", edgecolor="white")
+                ax.axvline(0.5, color="k", ls=":", lw=1, label="chance = 0.5")
+                ax.axvline(obs_acc, color="#d62728", lw=2.2,
+                           label=f"observed = {obs_acc:.3f}\np = {p:.4f}")
+                ax.set_title(f"{name}\n(LOCO-by-cage)")
+                ax.set_xlabel("balanced accuracy"); ax.set_ylabel("# permutations")
+                ax.legend(fontsize=8, loc="upper right")
+                print(f"  {name:24s} observed={obs_acc:.3f}  null mean={null.mean():.3f} "
+                      f"sd={null.std():.3f}  p={p:.4f}")
+            out_png = os.path.join(paths["plot_dir"], f"permutation_test_{args.split}.png")
+            plt.tight_layout(); plt.savefig(out_png, dpi=150); plt.close()
+            print(f"  saved -> {out_png}")
+            print(f"  p = fraction of {args.n_perm} label-shuffles with balanced-acc >= observed")
+            print(f"  (n={len(np.unique(cage_all))} cage groups -> coarse; p is honest about that)")
+
+        # ----------------- (E) supervised LDA projection (leave-one-cage-out) -----------------
+        print("\n" + "=" * 72)
+        print("(E) LDA PROJECTION  (supervised separating axis, LOCO-by-cage, leakage-aware)")
+        print("=" * 72)
+        ld = logo_lda_scores(lat, rank, cage_all)             # one score per window
+        fig, (axh, axr) = plt.subplots(1, 2, figsize=(11, 4))
+        for v, c, lbl in [(1, DOM, RANK_HI), (0, SUB, RANK_LO)]:
+            axh.hist(ld[rank == v], bins=25, alpha=0.6, color=c, label=lbl, edgecolor="white")
+        axh.set_title("Per-window LDA score by rank\n(held-out projection)")
+        axh.set_xlabel("LDA discriminant score"); axh.set_ylabel("# windows"); axh.legend(fontsize=8)
+        recs = np.unique(rid_all)
+        rec_mean = np.array([ld[rid_all == r].mean() for r in recs])
+        rec_rank = np.array([rank[rid_all == r][0] for r in recs])
+        rng = np.random.RandomState(0)
+        for v, c in [(1, DOM), (0, SUB)]:
+            m = rec_rank == v
+            x = v + (rng.rand(m.sum()) - 0.5) * 0.25
+            axr.scatter(x, rec_mean[m], s=55, color=c, edgecolor="k", linewidth=0.4, alpha=0.85)
+        axr.set_xticks([0, 1]); axr.set_xticklabels(["Subordinate", "Dominant"])
+        axr.set_title("Per-recording mean LDA score\n(one point per recording)")
+        axr.set_ylabel("mean LDA discriminant score")
+        out_png = os.path.join(paths["plot_dir"], f"lda_projection_{args.split}.png")
+        plt.tight_layout(); plt.savefig(out_png, dpi=150); plt.close()
+        print(f"  saved -> {out_png}")
+        print("  left = per-window score by rank; right = per-recording means (the unit that")
+        print("  matters). Projection is leave-one-cage-out, so separation here is not circular.")
+
+
+if __name__ == "__main__":
+    main()
