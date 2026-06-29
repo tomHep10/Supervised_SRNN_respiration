@@ -5,15 +5,41 @@ windows from sniffing-rich periods** → train the SRNN → test whether the lea
 **latent dynamics and switch statistics differ between positive (RI1) and negative (RI2)
 recordings**. `SRNN/` is imported, never modified.
 
+## Layout
+Shared **signal/training code lives at the root** of `respiration/` (used by both
+experiments); the **experiment-specific prepare + config** live in `valence/` and `rank/`.
+
 ## Files
+**Shared (root)**
 | File | Role |
 |---|---|
-| `config_respiration.yaml` | params + **local** data paths (for smoke tests) |
-| `config_respiration_hpg.yaml` | same, with **HiPerGator** data paths |
-| `prepare_respiration.py` | clean + window the recordings → `data_prepared/` |
-| `train_respiration.py` | train the SRNN (lean loop, subject-level split) |
-| `plot_respiration.py` | per-fold: resp reconstruction, states, latent PCA by valence |
-| `analyze_valence.py` | **leakage-free** cross-fold valence test (latent + switch stats) |
+| `resp_pipeline.py` | shared signal helpers: clean/downsample/bandpass, H5 loader, BORIS reader, `dead_signal_mask`, rasterize (imported by both prepares) |
+| `train_respiration.py` | train the SRNN (lean loop). Splits: `subject` (LOSO) / `cage` (LOCO) / `window` |
+| `plot_respiration.py` | per-fold figures (target-agnostic: valence or rank) — resp reconstruction, states, latent PCA |
+
+**`valence/`** (valence experiment)
+| File | Role |
+|---|---|
+| `valence/config_respiration.yaml` | params + **local** data paths (for smoke tests) |
+| `valence/config_respiration_hpg.yaml` | same, with **HiPerGator** data paths |
+| `valence/prepare_respiration.py` | clean + window the recordings → `data_prepared/` |
+| `valence/analyze_valence.py` | **leakage-free** cross-fold valence test (latent + switch stats) |
+
+**`rank/`** (cagemate/rank experiment)
+| File | Role |
+|---|---|
+| `rank/config_rank_hpg.yaml` | params + HiPerGator paths for the rank run |
+| `rank/prepare_rank.py` | clean + window the recordings → `data_prepared_rank/` (target=rank) |
+
+## RANK pipeline
+The rank (cagemate dominance) experiment reuses the shared trainer/plotter but has its own
+prepare + config: **target = `rank`** (via the config's `rank_map`), cross-validation is
+**leave-one-CAGE-out** (`--split cage`), and it writes to separate outputs
+`data_prepared_rank/`, `result_rank/`, `plot_rank/`. Run it with:
+```bash
+python respiration/rank/prepare_rank.py --config respiration/rank/config_rank_hpg.yaml
+sbatch hipergator/rank_job_loco.slurm
+```
 
 ## Data design (matches the agreed spec)
 - 4 recordings = 4 independent sequences. **RI1 = positive, RI2 = negative.**
@@ -28,12 +54,12 @@ recordings**. `SRNN/` is imported, never modified.
 ## Run order
 ```bash
 # local smoke test (CPU, sleap-new env):
-conda run -n sleap-new python respiration/prepare_respiration.py --config respiration/config_respiration.yaml
-conda run -n sleap-new python respiration/train_respiration.py  --config respiration/config_respiration.yaml --fold 0 --split subject --epochs 50
-conda run -n sleap-new python respiration/plot_respiration.py   --config respiration/config_respiration.yaml --fold 0 --split subject
+conda run -n sleap-new python respiration/valence/prepare_respiration.py --config respiration/valence/config_respiration.yaml
+conda run -n sleap-new python respiration/train_respiration.py  --config respiration/valence/config_respiration.yaml --fold 0 --split subject --epochs 50
+conda run -n sleap-new python respiration/plot_respiration.py   --config respiration/valence/config_respiration.yaml --fold 0 --split subject
 
 # HiPerGator (GPU): see ../hipergator/respiration_job_loso.slurm — runs folds 0-7, then:
-python respiration/analyze_valence.py --config respiration/config_respiration_hpg.yaml --split subject
+python respiration/valence/analyze_valence.py --config respiration/valence/config_respiration_hpg.yaml --split subject
 ```
 
 ## ⚠️ Key scientific caveats
@@ -103,13 +129,13 @@ negative (RI2): RI2_s1_1  RI2_s1_2  RI2_s2_3  RI2_s2_4  RI2_s3_5  RI2_s3_6  RI2_
 **How it's launched** — `hipergator/respiration_job_loso.slurm` as a SLURM array
 (`--array=0-7`, partition `hpg-b200`, 1 GPU/fold), each task running:
 ```bash
-python respiration/train_respiration.py --config respiration/config_respiration_hpg.yaml --fold $SLURM_ARRAY_TASK_ID --split subject
-python respiration/plot_respiration.py  --config respiration/config_respiration_hpg.yaml --fold $SLURM_ARRAY_TASK_ID --split subject
+python respiration/train_respiration.py --config respiration/valence/config_respiration_hpg.yaml --fold $SLURM_ARRAY_TASK_ID --split subject
+python respiration/plot_respiration.py  --config respiration/valence/config_respiration_hpg.yaml --fold $SLURM_ARRAY_TASK_ID --split subject
 ```
 Writes checkpoints `respiration/result/resp_srnn_subject_h8_fold{0..7}.pt`. After all 8
 folds finish, pool them for the leakage-free valence number:
 ```bash
-python respiration/analyze_valence.py --config respiration/config_respiration_hpg.yaml --split subject
+python respiration/valence/analyze_valence.py --config respiration/valence/config_respiration_hpg.yaml --split subject
 ```
 
 > **Figures note:** per-fold PNGs in `respiration/plot/` (`resp_recon.png`, `states.png`,

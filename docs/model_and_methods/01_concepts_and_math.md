@@ -263,7 +263,7 @@ loss_all = -(t1.mean() + t2.mean() + coef_cross*cross_en + infer_dist.entropy().
 ```
 
 `t1` is the `t = 0` part of the expected log-likelihood; `t2` is the sum over `t > 0`.
-Details in [03_model_internals.md](03_model_internals.md).
+Details in [03_model_internals.md](02_model_internals.md).
 
 ---
 
@@ -354,5 +354,5 @@ learning-rate scheduler that decays the step size over time.
 > destabilize training. **LR scheduler / StepLR:** multiply the learning rate by a factor
 > (`gamma = 0.8`) every `step_size` epochs, so learning slows down as it converges.
 
-Continue to [03_model_internals.md](03_model_internals.md) for the line-by-line code, or
-[04_usage_guide.md](04_usage_guide.md) to just run it.
+Continue to [03_model_internals.md](02_model_internals.md) for the line-by-line code, or
+[04_usage_guide.md](03_usage_guide.md) to just run it.

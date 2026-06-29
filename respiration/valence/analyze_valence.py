@@ -32,7 +32,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))  # repo root (file now in respiration/valence/)
 from SRNN import model_srnn, inference_network, train as srnn_train
 from sklearn.decomposition import PCA
 from sklearn.metrics import roc_auc_score, balanced_accuracy_score
@@ -166,7 +166,7 @@ def loso_lda_scores(X, y, groups):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", default="respiration/config_respiration_hpg.yaml")
+    ap.add_argument("--config", default="respiration/valence/config_respiration_hpg.yaml")
     ap.add_argument("--split", choices=["subject"], default="subject",
                     help="which trained folds to analyze. Only 'subject' (leave-one-subject-out) "
                          "is supported: every subject spans both valences, so holding out a whole "

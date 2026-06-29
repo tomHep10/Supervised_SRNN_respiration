@@ -11,7 +11,7 @@ Respiration-appropriate analysis of a trained checkpoint:
 
 Run from the repo root:
     conda run -n sleap-new python respiration/plot_respiration.py \
-        --config respiration/config_respiration.yaml
+        --config respiration/valence/config_respiration.yaml
 """
 import os, sys, argparse
 import numpy as np
@@ -31,9 +31,9 @@ from sklearn.model_selection import cross_val_score
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", default="respiration/config_respiration.yaml")
+    ap.add_argument("--config", default="respiration/valence/config_respiration.yaml")
     ap.add_argument("--fold", type=int, default=None)
-    ap.add_argument("--split", choices=["subject", "window"], default=None)
+    ap.add_argument("--split", choices=["subject", "cage", "window"], default=None)
     args = ap.parse_args()
     cfg = yaml.safe_load(open(args.config))
     paths = cfg["paths"]
@@ -49,7 +49,13 @@ def main():
     y_test = torch.tensor(ck["y_test"], dtype=torch.float32, device=device)
     X_test = torch.zeros_like(y_test)
     label_test = ck["label_test"][:, :, 0].astype(int)     # (n,T)
-    valence = ck["valence_test"]                            # (n,)
+    target = ck.get("target_test")                         # (n,) 2-class target
+    if target is None:
+        target = ck["valence_test"]                        # back-compat (old valence ckpts)
+    valence = target                                       # generic 2-class label below
+    tname = (ck.get("target_name") or "valence")           # 'valence' or 'rank'
+    cls_hi, cls_lo = {"valence": ("positive (RI1)", "negative (RI2)"),
+                      "rank":    ("Dominant", "Subordinate")}.get(tname, ("class 1", "class 0"))
 
     model = model_srnn.Model(D, num_tv, h, ck["neural_private_shape"]).to(device)
     rnninfer = inference_network.RNNInfer(D, h).to(device)
@@ -99,10 +105,10 @@ def main():
         H, val_pt, st_pt = H[sel], val_pt[sel], st_pt[sel]
     pcs = PCA(n_components=2).fit_transform(H)
     fig, axes = plt.subplots(1, 2, figsize=(9, 4))
-    for v, c, lbl in [(1, "#1b7837", "positive (RI1)"), (0, "#762a83", "negative (RI2)")]:
+    for v, c, lbl in [(1, "#1b7837", cls_hi), (0, "#762a83", cls_lo)]:
         m = val_pt == v
         axes[0].scatter(pcs[m, 0], pcs[m, 1], s=3, alpha=0.3, color=c, label=lbl)
-    axes[0].set_title("Latent PCA — colored by VALENCE"); axes[0].legend(markerscale=3, fontsize=8)
+    axes[0].set_title(f"Latent PCA — colored by {tname.upper()}"); axes[0].legend(markerscale=3, fontsize=8)
     axes[0].set_xlabel("PC1"); axes[0].set_ylabel("PC2")
     for k in range(num_tv):
         m = st_pt == k
@@ -111,23 +117,23 @@ def main():
     axes[1].set_xlabel("PC1"); axes[1].set_ylabel("PC2")
     plt.tight_layout(); plt.savefig(os.path.join(paths["plot_dir"], "latent_pca.png"), dpi=150); plt.close()
 
-    # ── 4) valence decoding from per-window mean latent ──
+    # ── 4) target (valence/rank) decoding from per-window mean latent ──
     Xw = latent.mean(axis=1)                               # (n, h)  per-window mean latent
-    msg = "valence decoding: need both classes in the test set (skipped)"
+    msg = f"{tname} decoding: need both classes in the test set (skipped)"
     if len(np.unique(valence)) == 2 and n >= 10:
         clf = LogisticRegression(max_iter=1000)
         try:
             acc = cross_val_score(clf, Xw, valence, cv=min(5, n // 2), scoring="balanced_accuracy")
-            msg = f"valence decoding (logreg on mean latent, CV bal-acc): {acc.mean():.3f} +/- {acc.std():.3f}"
+            msg = f"{tname} decoding (logreg on mean latent, CV bal-acc): {acc.mean():.3f} +/- {acc.std():.3f}"
         except Exception as e:
-            msg = f"valence decoding skipped ({e})"
+            msg = f"{tname} decoding skipped ({e})"
 
     print(f"saved figures to {paths['plot_dir']}")
-    print(f"test windows={n}  T={T}  num_tv={num_tv}  valence(pos/neg)={int((valence==1).sum())}/{int((valence==0).sum())}")
+    print(f"test windows={n}  T={T}  num_tv={num_tv}  {tname}(1/0)={int((valence==1).sum())}/{int((valence==0).sum())}")
     print(msg)
-    print("NOTE: with leave-one-subject-out a held-out subject contributes recordings of "
-          "BOTH valences, but per-fold valence decoding is still noisy; the leakage-free "
-          "valence numbers come from pooling latents across folds in analyze_valence.py.")
+    print(f"NOTE: a single held-out fold ({split_mode} split) usually has few/one class, so "
+          f"per-fold {tname} decoding is noisy; the leakage-free numbers come from pooling "
+          f"latents across folds in the cross-fold analysis.")
 
 
 if __name__ == "__main__":

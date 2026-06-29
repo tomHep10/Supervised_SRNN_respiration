@@ -40,12 +40,12 @@ conda activate SSRNN
 cd /home/t.heeps/blue_npadillacoreano/npadillacoreano/share/respiration-project/Supervised_SRNN_respiration
 mkdir -p logs
 
-CFG=respiration/config_respiration_hpg.yaml
+CFG=respiration/valence/config_respiration_hpg.yaml
 
 echo "############################################################"
 echo "### analyze_valence.py  --split subject  (leave-one-subject-out)"
 echo "############################################################"
-python respiration/analyze_valence.py --config $CFG --split subject --pca_fold 0
+python respiration/valence/analyze_valence.py --config $CFG --split subject --pca_fold 0
 
 echo ""
 echo "DONE. Figures in respiration/plot/ ; numbers above in this log."

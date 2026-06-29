@@ -14,7 +14,7 @@
 # Writes checkpoints respiration/result/resp_srnn_subject_h8_fold{0..7}.pt
 # After all 8 folds finish, the leakage-free (across-subject) analysis:
 #   sbatch hipergator/analyze_job.slurm          # (subject is the only split now)
-#   # or: python respiration/analyze_valence.py --config <hpg cfg> --split subject
+#   # or: python respiration/valence/analyze_valence.py --config <hpg cfg> --split subject
 # =============================================================================
 #SBATCH --job-name=resp-srnn-loso
 #SBATCH --output=logs/resp_loso_fold%a_%j.log
@@ -37,7 +37,7 @@ conda activate SSRNN
 cd /home/t.heeps/blue_npadillacoreano/npadillacoreano/share/respiration-project/Supervised_SRNN_respiration
 mkdir -p logs
 
-CFG=respiration/config_respiration_hpg.yaml
+CFG=respiration/valence/config_respiration_hpg.yaml
 
 # data_prepared/ must already exist (build it first: sbatch hipergator/prepare_respiration.slurm).
 python respiration/train_respiration.py --config $CFG --fold $SLURM_ARRAY_TASK_ID --split subject

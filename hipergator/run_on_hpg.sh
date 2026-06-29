@@ -8,7 +8,7 @@
 set -euo pipefail
 
 REPO="/home/t.heeps/blue_npadillacoreano/npadillacoreano/share/respiration-project/Supervised_SRNN_respiration"
-CFG="respiration/config_respiration_hpg.yaml"
+CFG="respiration/valence/config_respiration_hpg.yaml"
 
 cd "$REPO"
 module load conda
@@ -22,7 +22,7 @@ fi
 conda activate SSRNN
 
 echo ">> preparing windows (recordings from config -> 30s windows)..."
-python respiration/prepare_respiration.py --config "$CFG"
+python respiration/valence/prepare_respiration.py --config "$CFG"
 
 echo ""
 echo ">> your slurm associations (account / qos):"
@@ -45,7 +45,7 @@ echo "==========================================================================
 echo " submitted. monitor:   squeue -u $USER"
 echo " watch a fold:         tail -f logs/resp_loso_fold0_*.log"
 echo " AFTER all 8 finish:   conda activate SSRNN && \\"
-echo "                       python respiration/analyze_valence.py --config $CFG --split subject"
+echo "                       python respiration/valence/analyze_valence.py --config $CFG --split subject"
 echo "=========================================================================="
 echo " NOTE: if sbatch was rejected on --qos, rerun with the right qos from the"
 echo "       table above, e.g.:  sbatch --account=$ACCT --qos=${ACCT}-b hipergator/respiration_job_loso.slurm"

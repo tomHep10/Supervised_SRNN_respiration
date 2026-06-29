@@ -58,7 +58,7 @@ conda activate SSRNN
 
 Submit with `sbatch`, then poll `squeue`. Ready-made scripts are in
 [`../hipergator/`](../hipergator/) (see [01_project_layout.md](01_project_layout.md) for
-what each one does and [07_experiment_runbook.md](07_experiment_runbook.md) for the
+what each one does and [07_experiment_runbook.md](valence/02_experiment_runbook.md) for the
 step-by-step).
 
 > Rule of thumb: **if it would take more than ~30 s or use real CPU/GPU, it goes through
@@ -113,8 +113,8 @@ index). An agent waiting on a job should poll `squeue` in a loop rather than blo
   (`resp_srnn_<split>_h8_fold*.pt`).
 - **Figures:** [`../respiration/plot/`](../respiration/plot/).
 - **Full file-by-file tour:** [01_project_layout.md](01_project_layout.md).
-- **Why this project exists + latest findings:** [06_project_context.md](06_project_context.md).
-- **Step-by-step to reproduce the current experiment:** [07_experiment_runbook.md](07_experiment_runbook.md).
+- **Why this project exists + latest findings:** [06_project_context.md](valence/01_project_context.md).
+- **Step-by-step to reproduce the current experiment:** [07_experiment_runbook.md](valence/02_experiment_runbook.md).
 
 ---
 
@@ -127,7 +127,7 @@ index). An agent waiting on a job should poll `squeue` in a loop rather than blo
 - **Latest result:** breathing rate alone separates valence (ROC-AUC 1.0, but a confound);
   a valence signal **beyond** rate survives leave-one-subject-out and a permutation test
   (rate-removed latent ≈ 0.73, p ≈ 0.001). Details in
-  [06_project_context.md](06_project_context.md#findings--design-decisions-run-completed--2026-06-26).
+  [06_project_context.md](valence/01_project_context.md#findings--design-decisions-run-completed--2026-06-26).
 - **Re-run the classifier any time:** `sbatch hipergator/classifier_results.slurm`.
 
 ---

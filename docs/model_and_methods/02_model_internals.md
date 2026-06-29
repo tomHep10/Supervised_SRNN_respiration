@@ -1,6 +1,6 @@
 # 3. Model Internals — a line-by-line walk
 
-This file maps the math from [file 2](02_concepts_and_math.md) onto the actual code in
+This file maps the math from [file 2](01_concepts_and_math.md) onto the actual code in
 `SRNN/`. Read it with the source open. Shapes are written as `(B, T, …)` where `B` =
 batch of trials, `T` = time steps (100), `K = num_tv = 2`, `H = hidden_shape = 8`,
 `D = input_shape = 20`.
@@ -148,7 +148,7 @@ It is what the supervised cross-entropy compares to the labels, and what `plot.p
 
 ## 3.3 `baum_welch.py` — exact forward–backward over modes
 
-> Theory recap in [file 2, §2.6](02_concepts_and_math.md#26-baumwelch-forwardbackward).
+> Theory recap in [file 2, §2.6](01_concepts_and_math.md#26-baumwelch-forwardbackward).
 > Everything is log-space; `logsumexp` is "add probabilities" in log-space.
 
 **`dis_forward_pass`** (lines ~9–22): the forward recursion for `α_t`.
@@ -213,7 +213,7 @@ forces the inferred regimes toward the supplied labels. **This is the supervised
    clip_grad_norm_(...)        # stability
    optimizer.step(); optimizer_rnn.step()    # update BOTH networks
    ```
-   This is the full objective from [file 2, §2.5](02_concepts_and_math.md#25-the-training-objective--the-elbo-plus-a-supervised-twist).
+   This is the full objective from [file 2, §2.5](01_concepts_and_math.md#25-the-training-objective--the-elbo-plus-a-supervised-twist).
 4. **Schedulers** step each epoch; progress prints every 100 epochs with an ETA
    (`utils.compute_time`).
 5. **Autosave** every epoch to `result/autosave_…fold_0.pt` (crash recovery), storing
@@ -255,6 +255,6 @@ inference network). It is a utility — not called by `train.py` or `plot.py` by
 ---
 
 ## 3.7 Cross-references to the rest of the docs
-- Want the *why* behind any of this? → [02_concepts_and_math.md](02_concepts_and_math.md).
-- Want to *run* it? → [04_usage_guide.md](04_usage_guide.md).
-- Lost on a file? → [01_project_layout.md](01_project_layout.md).
+- Want the *why* behind any of this? → [02_concepts_and_math.md](01_concepts_and_math.md).
+- Want to *run* it? → [04_usage_guide.md](03_usage_guide.md).
+- Lost on a file? → [01_project_layout.md](../01_project_layout.md).

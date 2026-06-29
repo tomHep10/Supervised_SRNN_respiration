@@ -3,8 +3,8 @@
 > A **procedural, copy-paste** walkthrough of the current experiment so **you can run the
 > whole thing yourself.** Every step says *what it does*, *which node it runs on*, the
 > *exact command*, and *what you should see*. For the concepts behind it read
-> [06_project_context.md](06_project_context.md); for the environment basics read
-> [00_quickstart.md](00_quickstart.md).
+> [06_project_context.md](01_project_context.md); for the environment basics read
+> [00_quickstart.md](../00_quickstart.md).
 
 **The experiment in one line:** take 15 respiration recordings (7 positive RI1 / 8
 negative RI2), cut each into 30 s windows, train the SRNN in *discovery* mode
@@ -47,12 +47,12 @@ ls /blue/npadillacoreano/t.heeps/.conda/envs/SSRNN/bin/python && echo "env OK"
 **What it does:** reads the raw `.h5` respiration + BORIS `.csv`, cleans (downsample→50 Hz,
 bandpass 0.1–20 Hz, z-score), tiles each recording into the **top-10 sniffing-richest
 non-overlapping 30 s windows**, and writes the arrays to
-[`../respiration/data_prepared/`](../respiration/data_prepared/).
+[`../respiration/data_prepared/`](../../respiration/data_prepared/).
 
 This is fast and CPU-only, so the direct-Python path on the login node is fine:
 ```bash
 /blue/npadillacoreano/t.heeps/.conda/envs/SSRNN/bin/python \
-  respiration/prepare_respiration.py --config respiration/config_respiration_hpg.yaml
+  respiration/valence/prepare_respiration.py --config respiration/valence/config_respiration_hpg.yaml
 ```
 
 **You should see** `respiration/data_prepared/` containing `observations.npy`,
@@ -74,7 +74,7 @@ Training is **leave-one-SUBJECT-out** only. Leave-one-recording-out was dropped 
 every animal appears in both a positive and a negative recording, so holding out one
 recording still lets the model see the held-out animal's breathing — the real test of
 whether valence generalizes **across individuals** holds out *all* of a subject's
-recordings (see [06_project_context.md](06_project_context.md), finding #4).
+recordings (see [06_project_context.md](01_project_context.md), finding #4).
 
 **What it does:** trains 8 models; fold *k* holds out subject *k* (all of that animal's
 recordings) and trains on the rest. One GPU per fold, submitted as a SLURM **array**.
@@ -112,7 +112,7 @@ squeue -j <JOBID>                                  # wait for it to finish (~4 m
 cat logs/classifier_<JOBID>.log                    # all the numbers print here
 ```
 
-**Figures land in** [`../respiration/plot/`](../respiration/plot/):
+**Figures land in** [`../respiration/plot/`](../../respiration/plot/):
 `permutation_test_subject.png`, `lda_projection_subject.png`,
 `pooled_latent_pca_by_valence.png`.
 
@@ -123,7 +123,7 @@ sbatch hipergator/analyze_job.slurm            # subject split
 
 # quick peek without SLURM (small, CPU, login node tolerable):
 /blue/npadillacoreano/t.heeps/.conda/envs/SSRNN/bin/python \
-  respiration/analyze_valence.py --config respiration/config_respiration_hpg.yaml --split subject
+  respiration/valence/analyze_valence.py --config respiration/valence/config_respiration_hpg.yaml --split subject
 ```
 
 ---
@@ -153,7 +153,7 @@ cd /home/t.heeps/blue_npadillacoreano/npadillacoreano/share/respiration-project/
 PY=/blue/npadillacoreano/t.heeps/.conda/envs/SSRNN/bin/python
 
 # 1. prepare (once)
-$PY respiration/prepare_respiration.py --config respiration/config_respiration_hpg.yaml
+$PY respiration/valence/prepare_respiration.py --config respiration/valence/config_respiration_hpg.yaml
 
 # 2. train (GPU array) — wait for it to finish in squeue
 sbatch hipergator/respiration_job_loso.slurm   # leave-one-subject-out  (8)
@@ -163,4 +163,4 @@ sbatch hipergator/classifier_results.slurm
 ```
 
 > Reminder: only **prepare** is safe to run directly on the login node. **Training** and
-> the **full analysis** go through `sbatch`. See [00_quickstart.md](00_quickstart.md).
+> the **full analysis** go through `sbatch`. See [00_quickstart.md](../00_quickstart.md).

@@ -29,9 +29,9 @@ conda activate SSRNN
 cd /home/t.heeps/blue_npadillacoreano/npadillacoreano/share/respiration-project/Supervised_SRNN_respiration
 mkdir -p logs
 
-CFG=respiration/config_respiration_hpg.yaml
+CFG=respiration/valence/config_respiration_hpg.yaml
 
-python respiration/prepare_respiration.py --config $CFG
+python respiration/valence/prepare_respiration.py --config $CFG
 
 echo ""
 echo "=== observations shape ==="

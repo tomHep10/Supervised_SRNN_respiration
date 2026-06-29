@@ -1,0 +1,106 @@
+# Rank-SRNN config for HiPerGator  (created by Claude)
+# The CAGEMATE / RANK experiment. Identical signal pipeline to the valence config
+# (config_respiration_hpg.yaml): 50 Hz downsample, same bandpass, same dead-signal
+# removal, same 30 s top-N-sniffing windowing. The ONLY differences are:
+#   - data = cagemate baseline recordings (CM_*),
+#   - target = RANK (Dominant/Subordinate) from rank_map below (not valence-from-prefix),
+#   - cross-validation = leave-one-CAGE-out (animals interact only with cagemates).
+# Use on HPG:  --config respiration/config_rank_hpg.yaml
+
+paths:
+  # Cagemate respiration H5s and BORIS exports (separate trees from the valence data).
+  h5_dir:  "/home/t.heeps/blue_npadillacoreano/npadillacoreano/share/respiration-project/respiration/cagemates_baseline"
+  csv_dir: "/home/t.heeps/blue_npadillacoreano/npadillacoreano/share/respiration-project/cagemate_baseline_behavior"
+  # Kept SEPARATE from the valence artifacts so the two experiments never clobber each other.
+  out_dir:  "./respiration/data_prepared_rank"
+  save_dir: "./respiration/result_rank"
+  plot_dir: "./respiration/plot_rank"
+
+# Target labels. Subject = the sCAGE_ANIMAL token; within each cage the LOWER animal
+# number is Subordinate, the HIGHER is Dominant (0 = Subordinate, 1 = Dominant).
+# This map is also the INCLUSION LIST: an H5 whose subject token is not here is skipped.
+rank_map:
+  s1_1: 0   # Subordinate
+  s1_2: 1   # Dominant
+  s2_3: 0
+  s2_4: 1
+  s3_5: 0
+  s3_6: 1
+  s4_7: 0
+  s4_8: 1
+
+# Recording set is auto-discovered: prepare_rank.py globs *_merged.h5 in h5_dir, derives the
+# subject token (sX_Y) and cage (X) from the filename, and pairs each H5 to its BORIS csv by
+# the filename stem (the names are inconsistent: .csv / .1.csv / .1_VT.csv -> matched by prefix).
+#   skip_no_csv: true  -> recordings with NO behavior csv are dropped (window selection needs
+#                         sniffing labels). The second s3_5 recording (…_170708) has no csv and
+#                         is dropped under this default. Set false to keep them with zero labels.
+discovery:
+  glob: "*_merged.h5"
+  skip_no_csv: true
+  # Drop a recording whose focal animal barely engaged (too few real sniff bouts to define
+  # interaction windows). Drops CM_s3_6 (0 subject sniff bouts: in the cage but no behavior).
+  # Next-lowest real recording has 10 bouts, so 5 cleanly isolates the empty one.
+  min_sniff_bouts: 5
+  # Keep these subjects EVEN IF they fall below min_sniff_bouts. Use to add CM_s3_6 (cage 3's
+  # Dominant) back if you want more data — it has no behavior, so its windows are picked
+  # chronologically rather than by sniffing. Empty = s3_6 stays dropped (current default).
+  #   to include it:  force_include_subjects: ["s3_6"]
+  force_include_subjects: []
+  # Drop WHOLE cages by their leading index. Cage 1 (s1_1 / s1_2) is the fighting cage; set
+  # this to ["1"] to exclude it (mirrors the rank guide's balanced variant). Empty = keep all
+  # 4 cages (current default). Excluding a cage reduces the LOCO fold count accordingly.
+  #   to drop the fighting cage:  exclude_cages: ["1"]
+  exclude_cages: []
+
+preprocess:
+  resp_key: "resp"
+  orig_fs: 20000
+  target_fs: 50
+  lowpass_order: 4
+  bandpass_low: 0.1
+  bandpass_high: 20
+  bandpass_order: 2
+  zscore: true
+  subject_only: true
+  # Drop absurdly long "sniffing" bouts (BORIS artifacts) before windowing. CM_s2_3 has a
+  # 432 s anogenital bout (real sniffs are <6 s) that otherwise makes whole windows 100%
+  # sniff. 0 = off.
+  max_bout_sec: 30.0
+  # --- dead-signal removal: IDENTICAL to the valence pipeline (data-tuned thresholds) ---
+  remove_dead_signal: true
+  dead_win_sec: 1.0
+  dead_ref_pct: 75.0
+  dead_rel_thresh: 0.25
+  dead_abs_thresh: 0.0
+  dead_min_sec: 2.0
+  max_window_dead_frac: 0.20
+  behavior_states:
+    "body sniffing": 1
+    "anogenital sniffing": 2
+    "facial sniffing": 3
+
+windowing:
+  window_sec: 30.0           # T = 1500
+  windows_per_recording: 10  # top-N sniffing-richest non-overlapping windows per recording
+  rank_by_sniffing: true
+
+system:
+  device: "cuda"
+  dtype: "float32"
+  seed: 131
+
+model:
+  num_tv: 4
+  hidden_shape: 8
+  bottleneck_shape: 16
+  neural_private_shape: 8
+
+train:
+  split_mode: "cage"         # leave-one-CAGE-out (LOCO); 4 cages -> folds 0-3
+  fold: 0
+  epochs: 2000
+  lr: 0.001
+  coef_cross: 0.0            # 0 = DISCOVERY (switches learned from respiration, not sniff labels)
+  batch_size: 256
+  eval_every: 25

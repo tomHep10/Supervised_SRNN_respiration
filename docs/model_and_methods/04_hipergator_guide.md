@@ -7,7 +7,7 @@ it keeps going.
 It is written to be **copy-paste friendly for both a human and a Claude agent**:
 - Fill in the four blanks in the table below **once**.
 - Every command block is self-contained; replace the `ALL_CAPS` placeholders.
-- Ready-to-edit job scripts live in [`../hipergator/`](../hipergator/) — a GPU version
+- Ready-to-edit job scripts live in [`../hipergator/`](../../hipergator/) — a GPU version
   and a CPU version.
 
 ---
@@ -76,7 +76,7 @@ conda env create -f environment.yml          # creates the "SSRNN" env (one time
 
 ## Step 3 — The job script
 
-A ready-to-edit script is at [`../hipergator/ssrnn_job.slurm`](../hipergator/ssrnn_job.slurm).
+A ready-to-edit script is at [`../hipergator/ssrnn_job.slurm`](../../hipergator/ssrnn_job.slurm).
 It uses a **job array** (`--array=0-4`) so all five cross-validation folds run as five
 independent jobs from a single `sbatch`:
 
@@ -155,7 +155,7 @@ python plot.py
 
 This model is small and bottlenecked by a per-timestep Python loop, so a **CPU job is
 totally viable** and skips the GPU queue entirely. The script
-[`../hipergator/ssrnn_job_cpu.slurm`](../hipergator/ssrnn_job_cpu.slurm) is the same as
+[`../hipergator/ssrnn_job_cpu.slurm`](../../hipergator/ssrnn_job_cpu.slurm) is the same as
 above with the GPU lines removed:
 
 ```bash
@@ -183,7 +183,7 @@ python array_hidden8.py --config config.yaml --fold $SLURM_ARRAY_TASK_ID
 ```
 
 The code auto-detects no GPU and runs on CPU with no edits
-([array_hidden8.py:120](../array_hidden8.py#L120)).
+([array_hidden8.py:120](../../array_hidden8.py#L120)).
 
 ---
 

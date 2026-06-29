@@ -9,7 +9,7 @@ hundreds of real windows. We import SRNN.train.eval_ for evaluation only.
 
 Run from the repo root:
     conda run -n sleap-new python respiration/train_respiration.py \
-        --config respiration/config_respiration.yaml
+        --config respiration/valence/config_respiration.yaml
 CLI overrides: --fold --epochs --num_tv --hidden_shape --coef_cross
 """
 import os, sys, json, time, argparse
@@ -25,13 +25,13 @@ from SRNN import loss_function, initialization
 
 def parse_args():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--config", default="respiration/config_respiration.yaml")
+    ap.add_argument("--config", default="respiration/valence/config_respiration.yaml")
     ap.add_argument("--fold", type=int, default=None)
     ap.add_argument("--epochs", type=int, default=None)
     ap.add_argument("--num_tv", type=int, default=None)
     ap.add_argument("--hidden_shape", type=int, default=None)
     ap.add_argument("--coef_cross", type=float, default=None)
-    ap.add_argument("--split", choices=["subject", "window"], default=None)
+    ap.add_argument("--split", choices=["subject", "cage", "window"], default=None)
     return ap.parse_args()
 
 
@@ -60,6 +60,19 @@ def split_indices(meta, mode, fold):
         test_subj = subj_ids[fold % len(subj_ids)]
         test_idx = np.where(subj == test_subj)[0]
         train_idx = np.where(subj != test_subj)[0]
+    elif mode == "cage":
+        # leave-one-CAGE-out (LOCO): the rank experiment. Animals interact only with
+        # cagemates, so a held-out recording whose CAGEMATE is in training leaks. The cage
+        # is the FIRST index of the subject token (sCAGE_ANIMAL); holding out a whole cage
+        # removes both that cage's mice from training. (4 cages -> folds 0-3.)
+        import re
+        names = meta["recording_names"]
+        cage_of_rec = np.array([re.search(r"s(\d+)_\d+", str(s)).group(1) for s in names])
+        cage = cage_of_rec[rid]                              # per-window cage
+        cage_ids = np.unique(cage)
+        test_cage = cage_ids[fold % len(cage_ids)]
+        test_idx = np.where(cage == test_cage)[0]
+        train_idx = np.where(cage != test_cage)[0]
     else:  # random window KFold
         from sklearn.model_selection import KFold
         kf = KFold(n_splits=5, shuffle=True, random_state=42)
@@ -149,19 +162,30 @@ def main():
                   f"| {el:5.0f}s elapsed, ~{eta:5.0f}s left", flush=True)
             with open(prog_path, "a") as pf:
                 pf.write(f"{epoch},{running:.1f},{mse:.6f},{el:.0f},{eta:.0f}\n")
-            torch.save({
+            # per-recording target is valence (valence experiment) or rank (rank experiment);
+            # store it generically as target_test, and keep the experiment-specific key so the
+            # downstream analysis scripts find what they expect.
+            target_name = "valence" if "valence" in meta else ("rank" if "rank" in meta else None)
+            ckpt = {
                 "config": cfg, "fold": fold, "num_tv": num_tv, "hidden_shape": hidden_shape,
                 "neural_private_shape": int(M["neural_private_shape"]), "D": D,
                 "coef_cross": coef_cross, "epoch": epoch,
                 "model_state_dict": model.state_dict(),
                 "rnninfer_state_dict": rnninfer.state_dict(),
                 "y_test": obs[test_idx], "label_test": lab[test_idx],
-                "valence_test": meta["valence"][test_idx],
+                "target_name": target_name,
                 "recording_id_test": meta["recording_id"][test_idx],
                 "recording_names": meta["recording_names"],
                 "test_idx": test_idx, "train_idx": train_idx,
                 "loss_curve": loss_curve,
-            }, ckpt_path)
+            }
+            if target_name is not None:
+                ckpt["target_test"] = meta[target_name][test_idx]
+                ckpt[f"{target_name}_test"] = meta[target_name][test_idx]
+            for k in ("subject", "cage_id"):                 # carried for grouped analysis
+                if k in meta:
+                    ckpt[k] = meta[k]
+            torch.save(ckpt, ckpt_path)
 
     print(f"done. checkpoint -> {ckpt_path}")
 

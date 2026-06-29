@@ -2,7 +2,7 @@
 
 > A standing record of *why* this repo is being used and the open questions driving it.
 > This is research context (not derivable from the code). The model in this repo is the
-> **supervised SRNN**, not SSLD — see [05 model comparison facts in README](README.md#a-note-on-srnn-vs-slld)
+> **supervised SRNN**, not SSLD — see [05 model comparison facts in README](../README.md#a-note-on-srnn-vs-slld)
 > and the SRNN/SSLD analysis from the papers.
 
 ## Goal
@@ -113,7 +113,7 @@ contain multiple behaviors.
 These are starting observations, **not** final answers — flagged for the analysis to come:
 
 - **Sequence length is a real constraint here.** The generative model loops over time
-  steps in Python ([model_srnn.py:91](../SRNN/model_srnn.py#L91)) and the Baum–Welch
+  steps in Python ([model_srnn.py:91](../../SRNN/model_srnn.py#L91)) and the Baum–Welch
   passes are sequential recursions over `T`. The shipped sim uses `T = 100`. At
   `T ≈ 30,000` per recording, a single forward pass would be ~300× longer per step and
   memory for the `(B, T, K, K)` tensors grows linearly in `T` — so **full 10-min
@@ -123,7 +123,7 @@ These are starting observations, **not** final answers — flagged for the analy
   to *cutting* a long recording into contiguous windows (cutting preserves real dynamics
   within each window).
 - The repo is the **supervised** SRNN: it already supports a behavioral-label prior via
-  `coef_cross` ([train.py:57](../SRNN/train.py#L57)). With `coef_cross = 0` it becomes
+  `coef_cross` ([train.py:57](../../SRNN/train.py#L57)). With `coef_cross = 0` it becomes
   effectively unsupervised — useful if you want the switches to be *discovered* rather
   than tied to sniff labels (relevant to Q5).
 - Latent analyses (Q6) map onto saved outputs: the continuous latent `h` (inference
@@ -174,7 +174,7 @@ state-occupancy, PCA/UMAP, leakage-free leave-one-subject-out valence decoding v
 via `collect_folds.py`; both LORO and that script have since been removed — see "Findings".)*
 
 *Operational details (exact recording list, launch commands, output paths) live in
-[respiration/README.md](../respiration/README.md#current-experiment-running-now--updated-2026-06-26).*
+[respiration/README.md](../../respiration/README.md#current-experiment-running-now--updated-2026-06-26).*
 
 ---
 
@@ -182,7 +182,7 @@ via `collect_folds.py`; both LORO and that script have since been removed — se
 
 All 15 LORO folds trained (2000 epochs; held-out reconstruction MSE 0.0014–0.019 — the
 30 s windowing is computationally fine, answering Q1–Q3). Analysis via
-`respiration/analyze_valence.py` (CPU, inference-only; launch with
+`respiration/valence/analyze_valence.py` (CPU, inference-only; launch with
 `hipergator/analyze_job.slurm`).
 
 > **Pipeline update (2026-06-28):** because of the subject leakage documented in finding #4
@@ -267,7 +267,7 @@ of whether valence generalizes *across individuals* is **leave-one-subject-out (
   breaking the "phase dominates reconstruction" trap that keeps the single-view SRNN
   biological.
 
-**New analysis artifacts:** `respiration/analyze_valence.py` (recording-level breathing-rate
+**New analysis artifacts:** `respiration/valence/analyze_valence.py` (recording-level breathing-rate
 test + pooled single-model latent PCA + rate-controlled LOSO decode, via a `--split subject`
 flag), `hipergator/analyze_job.slurm` (CPU), `hipergator/respiration_job_loso.slurm` (leave-one-
 subject-out training array), a `subject` split mode in `train_respiration.py`, and

@@ -125,7 +125,7 @@ To see what the per-mode RNNs generate on their own (not relying on the inferenc
 from SRNN import generative_check
 y_dreamed, h_dreamed = generative_check.run(model, rnninfer, X_test, y_test, pos_test, 'cpu')
 ```
-See [03_model_internals.md §3.6](03_model_internals.md#36-generative_checkpy--dreaming-from-the-model-optional).
+See [03_model_internals.md §3.6](02_model_internals.md#36-generative_checkpy--dreaming-from-the-model-optional).
 
 ---
 
@@ -193,7 +193,7 @@ The model is data-agnostic — it just needs the two arrays in the right shape.
 | `train.batch_size` | Trials per gradient step (`64`; with only 40 train trials this means one batch). |
 | `experiment.seed` | Random seed for reproducibility (`131`). |
 | `experiment.fold` | Which CV fold (0–4) is the test set. Overridden by `--fold`. |
-| `model.bottleneck_shape`, `model.neural_private_shape` | **Unused** in this simplified model (see [file 1](01_project_layout.md)). Leftovers; changing them does nothing. |
+| `model.bottleneck_shape`, `model.neural_private_shape` | **Unused** in this simplified model (see [file 1](../01_project_layout.md)). Leftovers; changing them does nothing. |
 
 ---
 
