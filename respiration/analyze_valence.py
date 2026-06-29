@@ -167,10 +167,11 @@ def loso_lda_scores(X, y, groups):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="respiration/config_respiration_hpg.yaml")
-    ap.add_argument("--split", choices=["recording", "subject"], default="recording",
-                    help="which trained folds to analyze: 'recording' (leave-one-recording-out, "
-                         "15 folds) or 'subject' (leave-one-subject-out, 4 folds; leakage-free "
-                         "across individuals since every subject spans both valences)")
+    ap.add_argument("--split", choices=["subject"], default="subject",
+                    help="which trained folds to analyze. Only 'subject' (leave-one-subject-out) "
+                         "is supported: every subject spans both valences, so holding out a whole "
+                         "subject is leakage-free across individuals. Leave-one-recording-out was "
+                         "removed -- it leaks (a held-out recording's subject is still in training).")
     ap.add_argument("--pca_fold", type=int, default=0,
                     help="which fold's trained model to use for the pooled PCA")
     ap.add_argument("--n_perm", type=int, default=1000,
@@ -204,7 +205,7 @@ def main():
         names = np.asarray(ck["recording_names"]); rid = np.asarray(ck["recording_id_test"])
         val = np.asarray(ck["valence_test"])
         # group this fold's held-out windows BY RECORDING (a subject fold holds out
-        # several recordings of BOTH valences; a recording fold holds out exactly one).
+        # several recordings of BOTH valences).
         for r in np.unique(rid):
             m = rid == r
             rows.append((str(names[r]), int(val[m][0]), int(m.sum()),
@@ -263,36 +264,27 @@ def main():
     # Everything clean so far is rate (states = inhale/exhale -> switch rate = rate).
     # The NEXT experiment will be rate-matched, so the real question is whether the
     # latent carries valence AFTER rate is removed. Three decodes (rate only / full
-    # latent / latent with rate regressed out), each reported under TWO groupings:
-    #   - LORO  (leave-one-RECORDING-out): a held-out recording's SUBJECT is still in
-    #            train, so individual respiration signatures leak -> optimistic.
-    #   - LOSO  (leave-one-SUBJECT-out):   every subject spans both valences, so this
-    #            tests whether valence generalizes ACROSS individuals -> the real test.
-    # Decoder grouping is applied here regardless of which models were trained; for a
-    # fully leakage-free claim also train with --split subject (so the SRNN itself
-    # never saw the held-out subject) and run this with --split subject.
+    # latent / latent with rate regressed out), all under leave-one-SUBJECT-out (LOSO)
+    # grouping: every subject spans both valences, so holding out a whole subject tests
+    # whether valence generalizes ACROSS individuals -> the real, leakage-free test.
+    # (Leave-one-recording-out was removed: a held-out recording's subject is still in
+    # train, so individual respiration signatures leak and inflate the number.)
     if len(np.unique(valence)) == 2:
         print("\n" + "=" * 72)
         print("(C) VALENCE SIGNAL BEYOND BREATHING RATE")
-        print(f"    decoder grouping shown both ways; PCA/latent model = fold-{args.pca_fold} "
-              f"('{args.split}' split)")
+        print(f"    leave-one-subject-out decoding; PCA/latent model = fold-{args.pca_fold}")
         print("=" * 72)
         swr_all = per_window_switch_rate(model, rnninfer, y_all, device)   # rate proxy, same model
         n_subj = len(np.unique(subj_all))
-        print(f"  {'feature':34s} {'LORO(recording)':>16s} {'LOSO(subject)':>15s}")
+        print(f"  {'feature':34s} {'LOSO(subject)':>15s}")
         for label, X, resid in [("1. rate only (switch rate)", swr_all, None),
                                  ("2. full latent h", lat, None),
                                  ("3. latent h, RATE regressed out", lat, swr_all)]:
-            a_rec  = logo_decode(X, valence, rid_all,  residualize=resid)
             a_subj = logo_decode(X, valence, subj_all, residualize=resid)
-            print(f"  {label:34s} {a_rec:16.3f} {a_subj:15.3f}")
+            print(f"  {label:34s} {a_subj:15.3f}")
         print(f"  (chance=0.5; LOSO uses only n={n_subj} subject groups -> coarse, treat as pilot)")
-        print("  read the LOSO column: if it collapses to ~chance, the apparent signal was")
-        print("  individual-respiration leakage, not valence that generalizes across animals.")
-        if args.split != "subject":
-            print("  NOTE: models here are leave-one-RECORDING-out, so the SRNN still saw each")
-            print("  held-out subject. For the clean claim: sbatch hipergator/respiration_job_loso.slurm")
-            print("  then re-run:  python respiration/analyze_valence.py --split subject")
+        print("  if the rate-removed latent (row 3) collapses to ~chance, the apparent signal")
+        print("  was individual-respiration leakage, not valence that generalizes across animals.")
 
         # ----------------- (D) permutation test + plot (LOSO-by-subject) -----------------
         if args.n_perm > 0:

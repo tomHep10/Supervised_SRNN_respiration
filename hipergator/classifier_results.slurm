@@ -2,14 +2,18 @@
 # =============================================================================
 # HiPerGator CPU job: run the leakage-aware valence classifier on the trained
 # SRNN folds and produce all result figures + the leakage-free decoding numbers.
-# Inference only (no training, no GPU). Runs BOTH cross-validation splits that
-# have trained checkpoints:
-#   - recording  (leave-one-recording-out, folds 0-14)
-#   - subject    (leave-one-subject-out,   folds 0-7)
+# Inference only (no training, no GPU).
+#
+# LOSO-ONLY (2026-06-28): leave-one-recording-out was dropped because it leaks —
+# the same subject appears in multiple recordings, so a held-out recording still
+# shares a subject with the training set. We now run only the subject split
+# (leave-one-subject-out, folds 0-7). collect_folds.py is omitted: it is a pure
+# leave-one-recording-out decoder and is superseded by analyze_valence's
+# leave-one-subject-out (logo) decoding.
 # Outputs:
 #   (A) recording-level breathing-rate / switch-rate ROC-AUC      -> log
 #   (B) pooled latent PCA colored by valence                      -> respiration/plot/
-#   (C) leakage-free LORO valence decoding (latent / switch / both)-> log
+#   (C) leakage-free LOSO valence decoding (latent / switch / both)-> log
 #   (D) permutation test + LDA projection                         -> respiration/plot/
 #
 # Submit from the repo root:
@@ -39,17 +43,9 @@ mkdir -p logs
 CFG=respiration/config_respiration_hpg.yaml
 
 echo "############################################################"
-echo "### collect_folds.py  (leakage-free LORO valence decode) ###"
+echo "### analyze_valence.py  --split subject  (leave-one-subject-out)"
 echo "############################################################"
-python respiration/collect_folds.py --config $CFG
-
-for SPLIT in recording subject; do
-  echo ""
-  echo "############################################################"
-  echo "### analyze_valence.py  --split $SPLIT"
-  echo "############################################################"
-  python respiration/analyze_valence.py --config $CFG --split $SPLIT --pca_fold 0
-done
+python respiration/analyze_valence.py --config $CFG --split subject --pca_fold 0
 
 echo ""
 echo "DONE. Figures in respiration/plot/ ; numbers above in this log."

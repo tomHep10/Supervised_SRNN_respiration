@@ -33,12 +33,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="respiration/config_respiration.yaml")
     ap.add_argument("--fold", type=int, default=None)
-    ap.add_argument("--split", choices=["recording", "subject", "window"], default=None)
+    ap.add_argument("--split", choices=["subject", "window"], default=None)
     args = ap.parse_args()
     cfg = yaml.safe_load(open(args.config))
     paths = cfg["paths"]
     fold = args.fold if args.fold is not None else int(cfg["train"]["fold"])
-    split_mode = args.split if args.split is not None else cfg["train"].get("split_mode", "recording")
+    split_mode = args.split if args.split is not None else cfg["train"].get("split_mode", "subject")
     h = int(cfg["model"]["hidden_shape"])
     ckpt_path = os.path.join(paths["save_dir"], f"resp_srnn_{split_mode}_h{h}_fold{fold}.pt")
 
@@ -125,9 +125,9 @@ def main():
     print(f"saved figures to {paths['plot_dir']}")
     print(f"test windows={n}  T={T}  num_tv={num_tv}  valence(pos/neg)={int((valence==1).sum())}/{int((valence==0).sum())}")
     print(msg)
-    print("NOTE: with leave-one-recording-out the test set is usually ONE valence, so "
-          "valence decoding is only meaningful with split_mode='window' or by pooling "
-          "latents across folds.")
+    print("NOTE: with leave-one-subject-out a held-out subject contributes recordings of "
+          "BOTH valences, but per-fold valence decoding is still noisy; the leakage-free "
+          "valence numbers come from pooling latents across folds in analyze_valence.py.")
 
 
 if __name__ == "__main__":

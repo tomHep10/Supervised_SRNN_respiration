@@ -2,17 +2,18 @@
 # =============================================================================
 # HiPerGator GPU job: LEAVE-ONE-SUBJECT-OUT respiration SRNN  (created by Claude)
 #
-# Why: every subject (s1..s4) appears in BOTH RI1 (positive) and RI2 (negative),
-# so leave-one-RECORDING-out (respiration_job.slurm) leaks individual respiration
-# signatures -- the held-out recording's subject is still in the training set.
-# Holding out ALL of a subject's recordings tests whether valence generalizes
-# ACROSS individuals (the real claim). Subject = full sX_Y token (trailing number =
-# individual). The current prepared set has 8 subjects -> array 0-7. (If you re-prepare
-# with more recordings, e.g. add s5_13, bump --array to match the subject count.)
+# Why: every subject (sX_Y) appears in BOTH RI1 (positive) and RI2 (negative), so
+# leave-one-RECORDING-out would leak individual respiration signatures -- the held-out
+# recording's subject is still in the training set. (That split was removed from the
+# repo for exactly this reason; this is now the only training array.) Holding out ALL of
+# a subject's recordings tests whether valence generalizes ACROSS individuals (the real
+# claim). Subject = full sX_Y token (trailing number = individual). The current prepared
+# set has 8 subjects -> array 0-7. (If you re-prepare with more recordings, e.g. add
+# s5_13, bump --array to match the subject count.)
 #
-# Writes checkpoints respiration/result/resp_srnn_subject_h8_fold{0..3}.pt
-# After all 4 folds finish, the leakage-free (across-subject) analysis:
-#   sbatch hipergator/analyze_job.slurm subject
+# Writes checkpoints respiration/result/resp_srnn_subject_h8_fold{0..7}.pt
+# After all 8 folds finish, the leakage-free (across-subject) analysis:
+#   sbatch hipergator/analyze_job.slurm          # (subject is the only split now)
 #   # or: python respiration/analyze_valence.py --config <hpg cfg> --split subject
 # =============================================================================
 #SBATCH --job-name=resp-srnn-loso
@@ -38,6 +39,6 @@ mkdir -p logs
 
 CFG=respiration/config_respiration_hpg.yaml
 
-# data_prepared/ must already exist (built once on the login node, see respiration_job.slurm header).
+# data_prepared/ must already exist (build it first: sbatch hipergator/prepare_respiration.slurm).
 python respiration/train_respiration.py --config $CFG --fold $SLURM_ARRAY_TASK_ID --split subject
 python respiration/plot_respiration.py  --config $CFG --fold $SLURM_ARRAY_TASK_ID --split subject

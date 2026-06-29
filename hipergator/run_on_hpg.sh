@@ -1,7 +1,8 @@
 #!/bin/bash
 # run_on_hpg.sh  (created by Claude)
 # Run this ON HiPerGator, inside your own SSH session (you type your password + DUO;
-# Claude never sees them). It prepares the windows and submits the 4-fold GPU array.
+# Claude never sees them). It prepares the windows and submits the leave-one-subject-out
+# GPU array (8 folds).
 #
 #   bash hipergator/run_on_hpg.sh
 set -euo pipefail
@@ -30,23 +31,23 @@ ACCT="$(sacctmgr -nP show assoc where user="$USER" format=account | sort -u | he
 echo ">> auto-detected account: ${ACCT:-<none-found>}"
 
 if [ -z "${ACCT:-}" ]; then
-  echo "!! Could not auto-detect your account. Edit hipergator/respiration_job.slurm"
-  echo "   (--account / --qos) using the table above, then run: sbatch hipergator/respiration_job.slurm"
+  echo "!! Could not auto-detect your account. Edit hipergator/respiration_job_loso.slurm"
+  echo "   (--account / --qos) using the table above, then run: sbatch hipergator/respiration_job_loso.slurm"
   exit 1
 fi
 
 mkdir -p logs
-echo ">> submitting leave-one-recording-out GPU array (15 folds, coef_cross=0, discovery)..."
-sbatch --account="$ACCT" --qos="$ACCT" hipergator/respiration_job.slurm
+echo ">> submitting leave-one-subject-out GPU array (8 folds, coef_cross=0, discovery)..."
+sbatch --account="$ACCT" --qos="$ACCT" hipergator/respiration_job_loso.slurm
 
 echo ""
 echo "=========================================================================="
 echo " submitted. monitor:   squeue -u $USER"
-echo " watch a fold:         tail -f logs/resp_fold0_*.log"
-echo " AFTER all 4 finish:   conda activate SSRNN && \\"
-echo "                       python respiration/collect_folds.py --config $CFG"
+echo " watch a fold:         tail -f logs/resp_loso_fold0_*.log"
+echo " AFTER all 8 finish:   conda activate SSRNN && \\"
+echo "                       python respiration/analyze_valence.py --config $CFG --split subject"
 echo "=========================================================================="
 echo " NOTE: if sbatch was rejected on --qos, rerun with the right qos from the"
-echo "       table above, e.g.:  sbatch --account=$ACCT --qos=${ACCT}-b hipergator/respiration_job.slurm"
+echo "       table above, e.g.:  sbatch --account=$ACCT --qos=${ACCT}-b hipergator/respiration_job_loso.slurm"
 echo " NOTE: if prepare failed to find h5 files, fix paths.h5_dir in $CFG (the"
 echo "       Resp_h5 folder that actually holds RI2_s2_3 & RI2_s3_6 on HPG)."

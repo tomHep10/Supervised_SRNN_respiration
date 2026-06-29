@@ -13,7 +13,7 @@ paths:
   save_dir: "./respiration/result"
   plot_dir: "./respiration/plot"
 
-# ALL recordings (7 positive RI1 + 8 negative RI2) -> n=15 for leave-one-recording-out.
+# ALL recordings (7 positive RI1 + 8 negative RI2); 8 subjects -> n=8 for leave-one-subject-out.
 recordings:
   - "RI1_s1_1"   # positive
   - "RI1_s1_2"
@@ -75,7 +75,7 @@ model:
   neural_private_shape: 8
 
 train:
-  split_mode: "recording"    # leave-one-recording-out (overlap-safe, no leakage)
+  split_mode: "subject"      # leave-one-SUBJECT-out (the only leakage-free split; LORO removed)
   fold: 0
   epochs: 2000
   lr: 0.001

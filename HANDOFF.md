@@ -63,10 +63,9 @@ Env python: `PY=/blue/npadillacoreano/t.heeps/.conda/envs/SSRNN/bin/python`
    - Sanity-check the shape changed:
      `$PY -c "import numpy as np; print(np.load('respiration/data_prepared/observations.npy').shape)"`
 
-2. **Retrain BOTH arrays** (the old checkpoints were trained on dead-contaminated windows —
+2. **Retrain** (the old checkpoints were trained on dead-contaminated windows —
    overwrite them). Wait for `squeue -u t.heeps` to clear between submit and analysis.
    ```bash
-   sbatch hipergator/respiration_job.slurm        # leave-one-recording-out (15 folds)
    sbatch hipergator/respiration_job_loso.slurm   # leave-one-subject-out  (8 folds)
    ```
 
@@ -81,7 +80,7 @@ Env python: `PY=/blue/npadillacoreano/t.heeps/.conda/envs/SSRNN/bin/python`
    - **`respiration/plot/resp_recon.png` no longer reconstructs flat dead signal** — this
      was the original motivation for the change.
    - The permutation test / decoding numbers in
-     `respiration/plot/permutation_test_{recording,subject}.png` are still meaningful (and
+     `respiration/plot/permutation_test_subject.png` are still meaningful (and
      ideally cleaner now that dead windows aren't diluting training).
 
 Full procedural detail (commands, what each step writes, monitoring) is in

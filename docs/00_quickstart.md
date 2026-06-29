@@ -122,8 +122,8 @@ index). An agent waiting on a job should poll `squeue` in a loop rather than blo
 
 - **Data:** 15 recordings (7 positive RI1 / 8 negative RI2), 8 subjects, windowed to
   **147 × 30 s windows** in [`../respiration/data_prepared/`](../respiration/data_prepared/).
-- **Trained:** all 15 leave-one-**recording**-out folds *and* all 8 leave-one-**subject**-out
-  folds (`resp_srnn_recording_h8_fold{0..14}.pt`, `resp_srnn_subject_h8_fold{0..7}.pt`).
+- **Trained:** all 8 leave-one-**subject**-out folds
+  (`resp_srnn_subject_h8_fold{0..7}.pt`).
 - **Latest result:** breathing rate alone separates valence (ROC-AUC 1.0, but a confound);
   a valence signal **beyond** rate survives leave-one-subject-out and a permutation test
   (rate-removed latent ≈ 0.73, p ≈ 0.001). Details in

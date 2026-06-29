@@ -13,8 +13,8 @@ paths:
   plot_dir: "./respiration/plot"
 
 # The 4 valence recordings (matched to h5 + csv by this 3-token prefix).
-# ALL available recordings (7 positive RI1 + 8 negative RI2) — enough for a
-# meaningful leave-one-recording-out decoder (n=15).
+# ALL available recordings (7 positive RI1 + 8 negative RI2); 8 subjects — enough for a
+# meaningful leave-one-SUBJECT-out decoder (n=8).
 recordings:
   - "RI1_s1_1"   # positive
   - "RI1_s1_2"
@@ -84,8 +84,8 @@ model:
   neural_private_shape: 8    # unused (kept for checkpoint compatibility)
 
 train:
-  split_mode: "recording"    # "recording" = leave-one-recording-out (no leakage); "window" = random KFold over windows
-  fold: 0                    # which recording (or window-fold) is held out for test
+  split_mode: "subject"      # "subject" = leave-one-SUBJECT-out (only leakage-free split; LORO removed); "window" = random KFold over windows
+  fold: 0                    # which subject (or window-fold) is held out for test
   epochs: 2000
   lr: 0.001
   coef_cross: 0.0           # discovery (unsupervised switches)

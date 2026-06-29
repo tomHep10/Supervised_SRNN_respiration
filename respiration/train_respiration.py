@@ -31,7 +31,7 @@ def parse_args():
     ap.add_argument("--num_tv", type=int, default=None)
     ap.add_argument("--hidden_shape", type=int, default=None)
     ap.add_argument("--coef_cross", type=float, default=None)
-    ap.add_argument("--split", choices=["recording", "subject", "window"], default=None)
+    ap.add_argument("--split", choices=["subject", "window"], default=None)
     return ap.parse_args()
 
 
@@ -40,10 +40,10 @@ def split_indices(meta, mode, fold):
     rid = meta["recording_id"]
     n = rid.shape[0]
     if mode == "recording":
-        rec_ids = np.unique(rid)
-        test_rec = rec_ids[fold % len(rec_ids)]
-        test_idx = np.where(rid == test_rec)[0]
-        train_idx = np.where(rid != test_rec)[0]
+        raise ValueError(
+            "split_mode 'recording' (leave-one-recording-out) was removed: every subject "
+            "appears in both RI1 and RI2, so a held-out recording's subject is still in "
+            "training and individual respiration signatures leak. Use 'subject' (LOSO).")
     elif mode == "subject":
         # leave-one-SUBJECT-out: every subject (sN) appears in both RI1 and RI2, so
         # leave-one-recording-out leaks individual respiration signatures into the
@@ -78,7 +78,7 @@ def main():
     hidden_shape= args.hidden_shape if args.hidden_shape is not None else int(M["hidden_shape"])
     coef_cross  = args.coef_cross  if args.coef_cross  is not None else float(Tr["coef_cross"])
     batch_size  = int(Tr["batch_size"]); eval_every = int(Tr.get("eval_every", 25))
-    lr = float(Tr["lr"]); split_mode = args.split if args.split is not None else Tr.get("split_mode", "recording")
+    lr = float(Tr["lr"]); split_mode = args.split if args.split is not None else Tr.get("split_mode", "subject")
 
     seed = int(cfg["system"].get("seed", 131))
     np.random.seed(seed); torch.manual_seed(seed)

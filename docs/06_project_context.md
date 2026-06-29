@@ -157,8 +157,10 @@ With `coef_cross = 0` the switching states are **discovered from respiration its
 valence signal would be a genuine discovery. (The supervised variant can be run separately
 for comparison.)
 
-**Cross-validation:** leave-one-recording-out across all 15 recordings — SLURM array
-`0–14`, one GPU per fold (`hipergator/respiration_job.slurm`, partition `hpg-b200`).
+**Cross-validation (as originally run):** leave-one-recording-out across all 15 recordings
+— SLURM array `0–14`, one GPU per fold (partition `hpg-b200`). *(Historical: this LORO
+setup has since been removed from the pipeline — see the note under "Findings" below; the
+live CV is now leave-one-subject-out only.)*
 
 **Fixed settings:** `num_tv = 4`, `hidden_shape = 8`, `bottleneck_shape = 16`,
 `neural_private_shape = 8`; 50 Hz, bandpass 0.1–20 Hz, z-scored, subject-only;
@@ -167,7 +169,9 @@ for comparison.)
 **Which open questions this run targets:** Q1–Q3 (feasibility via windowing — full 10-min
 recordings are not used), Q5 (does latent / switching structure separate valence, now at
 n=15 instead of n=4), and Q6 (analyses on the saved `h` and `pos_test`: switch statistics,
-state-occupancy, PCA/UMAP, leakage-free LORO valence decoding via `collect_folds.py`).
+state-occupancy, PCA/UMAP, leakage-free leave-one-subject-out valence decoding via
+`analyze_valence.py --split subject`). *(Historical note: this was originally a LORO decode
+via `collect_folds.py`; both LORO and that script have since been removed — see "Findings".)*
 
 *Operational details (exact recording list, launch commands, output paths) live in
 [respiration/README.md](../respiration/README.md#current-experiment-running-now--updated-2026-06-26).*
@@ -180,6 +184,13 @@ All 15 LORO folds trained (2000 epochs; held-out reconstruction MSE 0.0014–0.0
 30 s windowing is computationally fine, answering Q1–Q3). Analysis via
 `respiration/analyze_valence.py` (CPU, inference-only; launch with
 `hipergator/analyze_job.slurm`).
+
+> **Pipeline update (2026-06-28):** because of the subject leakage documented in finding #4
+> below, LORO (leave-one-recording-out) has been **removed from the pipeline** — the
+> recording-out training array and the `collect_folds.py` cross-fold decoder were deleted,
+> and the subject split (leave-one-subject-out) is now the **only** cross-validation the
+> code runs. The LORO numbers below are kept as the institutional record of *why* that
+> decision was made; they are no longer reproducible from the current code.
 
 **1. Discovery mode collapses to 2 of 4 states = breathing phase, not behavior.**
 With `coef_cross = 0`, only 2 of `num_tv = 4` states are ever used; they are the
@@ -229,11 +240,11 @@ to the full token (8 subjects).* So leave-one-*recording*-out keeps the held-out
 subject in training at **both** the SRNN-training level (the 15 folds are leave-one-recording-out)
 **and** the decoder-CV level — and respiration has strong individual signatures. The valid test
 of whether valence generalizes *across individuals* is **leave-one-subject-out (LOSO, 8 folds)**:
-- Decoder LOSO (regroup CV by subject, no retrain) is reported as the second column in
-  `analyze_valence.py` part (C) — run `sbatch hipergator/analyze_job.slurm` to refresh it.
-- Fully leakage-free LOSO (SRNN also never sees the held-out subject) needs retraining:
+- Decoder LOSO (regroup CV by subject, no retrain) was historically reported as the second
+  column in `analyze_valence.py` part (C) when the SRNN was still recording-trained.
+- Fully leakage-free LOSO (SRNN also never sees the held-out subject) is now the live path:
   `sbatch hipergator/respiration_job_loso.slurm` (`--split subject`, array 0–7,
-  → `resp_srnn_subject_h8_fold{0..7}.pt`), then `sbatch hipergator/analyze_job.slurm subject`.
+  → `resp_srnn_subject_h8_fold{0..7}.pt`), then `sbatch hipergator/analyze_job.slurm`.
 - Caveat: LOSO has only n=8 subject groups → coarse CV, pilot-level. The cleanest leakage-free
   *scalar* is breathing rate under LOSO models (part A); the latent decode stays descriptive
   (pooling latents across the 4 separately-trained LOSO models reintroduces cross-model
@@ -257,15 +268,16 @@ of whether valence generalizes *across individuals* is **leave-one-subject-out (
   biological.
 
 **New analysis artifacts:** `respiration/analyze_valence.py` (recording-level breathing-rate
-test + pooled single-model latent PCA + rate-controlled decode, with **LORO and LOSO** decoder
-groupings and a `--split recording|subject` flag), `hipergator/analyze_job.slurm` (CPU; takes
-an optional `recording|subject` arg), `hipergator/respiration_job_loso.slurm` (leave-one-
+test + pooled single-model latent PCA + rate-controlled LOSO decode, via a `--split subject`
+flag), `hipergator/analyze_job.slurm` (CPU), `hipergator/respiration_job_loso.slurm` (leave-one-
 subject-out training array), a `subject` split mode in `train_respiration.py`, and
-`respiration/plot/pooled_latent_pca_by_valence.png`. Part (D) adds a **permutation test**
-(`--n_perm`, default 1000): null = valence labels shuffled at the recording level,
-recomputing the LOSO-by-subject decode → p-value + `respiration/plot/permutation_test_{split}.png`.
+`respiration/plot/pooled_latent_pca_by_valence.png`. *(The `--split recording` LORO grouping
+that originally produced the LORO column above has since been removed.)* Part (D) adds a
+**permutation test** (`--n_perm`, default 1000): null = valence labels shuffled at the recording
+level, recomputing the LOSO-by-subject decode → p-value + `respiration/plot/permutation_test_{split}.png`.
 Part (E) adds a **leave-one-subject-out LDA projection** (the supervised separating axis PCA
 can't show; projection is held-out so not circular) → `respiration/plot/lda_projection_{split}.png`.
-The old `collect_folds.py` cross-fold latent decode is **not trustworthy** (it pools latents
+The old `collect_folds.py` cross-fold latent decode was **not trustworthy** (it pooled latents
 from separately-trained folds whose coordinate systems are not aligned — non-identifiability;
-use the single-model latent in `analyze_valence.py` instead).
+use the single-model latent in `analyze_valence.py` instead). That script has since been
+**removed** from the repo (2026-06-28) along with the LORO training array.

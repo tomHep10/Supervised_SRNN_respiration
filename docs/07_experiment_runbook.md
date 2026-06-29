@@ -14,7 +14,7 @@ separate positive vs. negative social valence.
 **Pipeline shape:**
 ```
 prepare  ──►  train (CV folds, GPU array)  ──►  analyze / classify (CPU)  ──►  read results
-(once)        respiration_job*.slurm            classifier_results.slurm        logs/ + plot/
+(once)        respiration_job_loso.slurm       classifier_results.slurm        logs/ + plot/
 ```
 
 All commands assume you start from the repo root:
@@ -70,39 +70,29 @@ This is fast and CPU-only, so the direct-Python path on the login node is fine:
 
 ## Step 2 — Train the model  (heavy → SLURM GPU array)
 
-There are **two** training runs. They differ only in *how cross-validation holds data out*
-— and that difference is the whole point of the leakage story (see
-[06_project_context.md](06_project_context.md), finding #4).
+Training is **leave-one-SUBJECT-out** only. Leave-one-recording-out was dropped because
+every animal appears in both a positive and a negative recording, so holding out one
+recording still lets the model see the held-out animal's breathing — the real test of
+whether valence generalizes **across individuals** holds out *all* of a subject's
+recordings (see [06_project_context.md](06_project_context.md), finding #4).
 
-### 2a. Primary run — leave-one-RECORDING-out (15 folds)
-**What it does:** trains 15 models; fold *k* holds out recording *k* and trains on the
-other 14. One GPU per fold, submitted as a SLURM **array**.
+**What it does:** trains 8 models; fold *k* holds out subject *k* (all of that animal's
+recordings) and trains on the rest. One GPU per fold, submitted as a SLURM **array**.
 ```bash
-sbatch hipergator/respiration_job.slurm        # --array=0-14, partition hpg-b200
+sbatch hipergator/respiration_job_loso.slurm   # --array=0-7, partition hpg-b200
 ```
-**Writes:** `respiration/result/resp_srnn_recording_h8_fold{0..14}.pt` (+ per-fold
-`progress_recording_fold*.csv`).
+**Writes:** `respiration/result/resp_srnn_subject_h8_fold{0..7}.pt` (+ per-fold
+`progress_subject_fold*.csv`).
 
-### 2b. Control run — leave-one-SUBJECT-out (8 folds)
-**Why:** every animal appears in both a positive and a negative recording, so
-leave-one-recording-out still lets the model see the held-out animal's breathing.
-Holding out *all* of a subject's recordings is the real test of whether valence
-generalizes **across individuals**.
-```bash
-sbatch hipergator/respiration_job_loso.slurm   # --array=0-7
-```
-**Writes:** `respiration/result/resp_srnn_subject_h8_fold{0..7}.pt`.
-
-### Monitor either run
+### Monitor the run
 ```bash
 squeue -u t.heeps                          # PD = pending, R = running; empty = all done
-tail -f logs/resp_fold0_*.log              # watch one recording fold (Ctrl-C to stop watching)
-tail -f logs/resp_loso_fold0_*.log         # watch one subject fold
+tail -f logs/resp_loso_fold0_*.log         # watch one subject fold (Ctrl-C to stop watching)
 ```
 Each fold trains 2000 epochs (~hours). The array runs folds in parallel as GPUs free up.
 Wait until `squeue` shows no `resp-srnn*` jobs before analyzing.
 
-> **Already trained.** All 15 recording folds and all 8 subject folds are present in
+> **Already trained.** All 8 subject folds are present in
 > `respiration/result/`. Only re-run Step 2 if you re-prepared the data or changed the
 > model/training config.
 
@@ -112,7 +102,7 @@ Wait until `squeue` shows no `resp-srnn*` jobs before analyzing.
 
 **What it does:** loads the trained checkpoints, runs inference (no training), and produces
 the valence results: breathing-rate ROC-AUC, leakage-free decoding numbers, permutation
-test, LDA projection, and latent PCA. **One job does both splits:**
+test, LDA projection, and latent PCA. **One job runs the subject split:**
 ```bash
 sbatch hipergator/classifier_results.slurm
 ```
@@ -123,14 +113,13 @@ cat logs/classifier_<JOBID>.log                    # all the numbers print here
 ```
 
 **Figures land in** [`../respiration/plot/`](../respiration/plot/):
-`permutation_test_{recording,subject}.png`, `lda_projection_{recording,subject}.png`,
+`permutation_test_subject.png`, `lda_projection_subject.png`,
 `pooled_latent_pca_by_valence.png`.
 
-### Variants (if you want just one piece)
+### Variants (if you want just the analyze step)
 ```bash
-# only one split's full analysis:
-sbatch hipergator/analyze_job.slurm            # recording split (default)
-sbatch hipergator/analyze_job.slurm subject    # subject split
+# the subject split's full analysis:
+sbatch hipergator/analyze_job.slurm            # subject split
 
 # quick peek without SLURM (small, CPU, login node tolerable):
 /blue/npadillacoreano/t.heeps/.conda/envs/SSRNN/bin/python \
@@ -146,14 +135,14 @@ In the log from Step 3, the sections that matter:
 | Section | Question it answers | What "good" looks like |
 |---|---|---|
 | **(A) breathing rate** | Does rate alone separate valence? | positive ≈ 7.8 Hz vs negative ≈ 6.3 Hz, ROC-AUC 1.0 — *real but a confound* |
-| **(C) signal beyond rate** | Is there valence info after removing rate? | `latent, rate regressed out` LOSO column stays well above ~0.5 |
+| **(C) signal beyond rate** | Is there valence info after removing rate? | `latent, rate regressed out` LOSO value stays well above ~0.5 |
 | **(D) permutation test** | Is it statistically real (not luck)? | observed beats the shuffled null, small `p` (e.g. 0.001) |
 | **(E) LDA projection** | Visualize the separating axis | per-recording means split by valence |
 
-**Ignore** the `collect_folds.py` block at the top of `classifier_results.slurm`'s log: it
-pools latents from separately-trained folds whose coordinate systems aren't aligned, so its
-numbers are not trustworthy — `analyze_valence.py`'s single-model latent is the one to read
-(this is documented in the script header itself).
+**Read** the `analyze_valence.py` single-model latent numbers — that is the trustworthy
+result. (An older `collect_folds.py` cross-fold decoder pooled latents from
+separately-trained folds whose coordinate systems aren't aligned, so its numbers were not
+trustworthy; that decoder has since been removed from the pipeline.)
 
 ---
 
@@ -166,8 +155,7 @@ PY=/blue/npadillacoreano/t.heeps/.conda/envs/SSRNN/bin/python
 # 1. prepare (once)
 $PY respiration/prepare_respiration.py --config respiration/config_respiration_hpg.yaml
 
-# 2. train (GPU arrays) — wait for both to finish in squeue
-sbatch hipergator/respiration_job.slurm        # leave-one-recording-out (15)
+# 2. train (GPU array) — wait for it to finish in squeue
 sbatch hipergator/respiration_job_loso.slurm   # leave-one-subject-out  (8)
 
 # 3. classify / analyze (CPU) — read the log when done

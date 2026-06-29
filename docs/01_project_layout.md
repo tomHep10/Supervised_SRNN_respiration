@@ -44,17 +44,15 @@ Supervised_SRNN_respiration/
 │   ├── train_respiration.py           ← train the SRNN (one CV fold per call)
 │   ├── plot_respiration.py            ← per-fold figures (recon, states, latent PCA)
 │   ├── analyze_valence.py             ← THE CLASSIFIER/ANALYSIS: valence tests across folds
-│   ├── collect_folds.py               ← old cross-fold decoder (superseded; see note)
 │   ├── data_prepared/                 ← output of prepare_ (observations/labels/meta)
 │   ├── result/                        ← trained checkpoints resp_srnn_<split>_h8_fold*.pt
 │   └── plot/                          ← analysis figures (PNGs)
 │
 ├── hipergator/                   ← SLURM JOB SCRIPTS (see "Job scripts" below, in order)
 │   ├── run_on_hpg.sh                  ← one-shot helper: build env + prepare + submit
-│   ├── respiration_job.slurm          ← TRAIN, leave-one-recording-out (GPU array 0-14)
 │   ├── respiration_job_loso.slurm     ← TRAIN, leave-one-subject-out  (GPU array 0-7)
-│   ├── analyze_job.slurm              ← ANALYZE one split (CPU)
-│   ├── classifier_results.slurm       ← ANALYZE both splits + collect_folds (CPU, one job)
+│   ├── analyze_job.slurm              ← ANALYZE the subject split (CPU)
+│   ├── classifier_results.slurm       ← ANALYZE the subject split (CPU, one job)
 │   ├── ssrnn_job.slurm                ← (legacy) train the sim demo on GPU
 │   └── ssrnn_job_cpu.slurm            ← (legacy) train the sim demo on CPU
 │
@@ -107,20 +105,19 @@ This is the code you actually run for the science. Order of use matches the pipe
 | `config_respiration_hpg.yaml` | All params + **HiPerGator** data paths, the recording list (15), valence map, windowing, model sizes, training knobs. | Edit to change the experiment; passed as `--config` to every script. |
 | `config_respiration.yaml` | Same but **local** paths, for small smoke tests off-cluster. | Local debugging only. |
 | `prepare_respiration.py` | Clean + window raw `.h5` + BORIS `.csv` → `data_prepared/`. | **Once**, before training (Step 1 of the runbook). |
-| `train_respiration.py` | Train the SRNN for **one** CV fold. Args: `--fold`, `--split {recording,subject,window}`, plus optional `--epochs/--num_tv/--hidden_shape/--coef_cross`. | Called by the training SLURM arrays, once per fold. |
+| `train_respiration.py` | Train the SRNN for **one** CV fold. Args: `--fold`, `--split {subject,window}`, plus optional `--epochs/--num_tv/--hidden_shape/--coef_cross`. | Called by the training SLURM array, once per fold. |
 | `plot_respiration.py` | Per-fold figures (resp reconstruction, inferred states, latent PCA). Args `--fold`, `--split`. | Right after each training fold (the SLURM scripts call it automatically). |
-| `analyze_valence.py` | **The classifier / valence analysis.** Pools the held-out folds and runs: (A) recording-level breathing-rate ROC-AUC, (B) pooled latent PCA, (C) rate-controlled decode with LORO **and** LOSO grouping, (D) permutation test, (E) LOSO LDA projection. Args `--split {recording,subject}`, `--pca_fold`, `--n_perm`. | After all folds train (Step 3); via `analyze_job.slurm` / `classifier_results.slurm`. |
-| `collect_folds.py` | Older cross-fold logistic-regression decoder. **Superseded** — it pools latents from separately-trained folds whose coordinate systems aren't aligned, so its numbers are untrustworthy. Kept for provenance. | Don't rely on it; use `analyze_valence.py`. |
+| `analyze_valence.py` | **The classifier / valence analysis.** Pools the held-out folds and runs: (A) recording-level breathing-rate ROC-AUC, (B) pooled latent PCA, (C) rate-controlled LOSO decode, (D) permutation test, (E) LOSO LDA projection. Args `--split subject`, `--pca_fold`, `--n_perm`. | After all folds train (Step 3); via `analyze_job.slurm` / `classifier_results.slurm`. |
 
 **Sub-folders:**
 - `data_prepared/` — output of `prepare_respiration.py`: `observations.npy`
   `(147,1500,1)`, `labels.npy`, `meta.npz` (recording/subject/valence per window),
   `label_map.json`.
 - `result/` — trained checkpoints, named `resp_srnn_<split>_h8_fold<k>.pt` (e.g.
-  `resp_srnn_recording_h8_fold0.pt`, `resp_srnn_subject_h8_fold3.pt`), plus per-fold
+  `resp_srnn_subject_h8_fold3.pt`), plus per-fold
   `progress_<split>_fold<k>.csv` training curves.
-- `plot/` — analysis figures: `permutation_test_{recording,subject}.png`,
-  `lda_projection_{recording,subject}.png`, `pooled_latent_pca_by_valence.png`, and the
+- `plot/` — analysis figures: `permutation_test_subject.png`,
+  `lda_projection_subject.png`, `pooled_latent_pca_by_valence.png`, and the
   per-fold `resp_recon.png` / `states.png` / `latent_pca.png` (these overwrite across
   folds — they show the last fold to run).
 
@@ -137,15 +134,14 @@ partition `hpg-b200`, CPU partition `hpg-default` (see [00_quickstart.md](00_qui
 
 | # | Script | Stage | GPU? | What it does / when to use |
 |---|--------|-------|------|----------------------------|
-| 0 | `run_on_hpg.sh` | setup | — | **Convenience one-shot** (not a SLURM file — `bash` it in your own SSH session). Builds the `SSRNN` env if missing, runs `prepare_respiration.py`, auto-detects your account, and submits the recording-out training array. Use it for a clean first run; afterwards prefer the individual steps. |
-| 1 | `respiration_job.slurm` | **train** | ✅ `hpg-b200` | **Primary training.** SLURM array `0-14` — one model per fold, leave-one-**recording**-out, `coef_cross=0` (discovery). Runs `train_respiration.py` then `plot_respiration.py` per fold. → `resp_srnn_recording_h8_fold{0..14}.pt`. Submit after `data_prepared/` exists. |
-| 2 | `respiration_job_loso.slurm` | **train** | ✅ `hpg-b200` | **Control training.** SLURM array `0-7` — leave-one-**subject**-out (holds out *all* of one animal's recordings). The clean test of cross-individual generalization (see file 06, finding #4). → `resp_srnn_subject_h8_fold{0..7}.pt`. |
-| 3 | `analyze_job.slurm` | **analyze** | ❌ `hpg-default` | Runs `analyze_valence.py` for **one** split. Default `recording`; pass `subject` as an arg (`sbatch hipergator/analyze_job.slurm subject`). Inference-only, minutes. Produces the valence numbers + figures. |
-| 4 | `classifier_results.slurm` | **analyze** | ❌ `hpg-default` | **All-in-one results job.** Runs `collect_folds.py` (for provenance) and `analyze_valence.py` for **both** splits in a single submission. The easiest way to refresh every result/figure at once. |
+| 0 | `run_on_hpg.sh` | setup | — | **Convenience one-shot** (not a SLURM file — `bash` it in your own SSH session). Builds the `SSRNN` env if missing, runs `prepare_respiration.py`, auto-detects your account, and submits the subject-out training array. Use it for a clean first run; afterwards prefer the individual steps. |
+| 1 | `respiration_job_loso.slurm` | **train** | ✅ `hpg-b200` | **Primary training.** SLURM array `0-7` — one model per fold, leave-one-**subject**-out (holds out *all* of one animal's recordings), `coef_cross=0` (discovery). Runs `train_respiration.py` then `plot_respiration.py` per fold. → `resp_srnn_subject_h8_fold{0..7}.pt`. The clean test of cross-individual generalization (see file 06, finding #4). Submit after `data_prepared/` exists. |
+| 2 | `analyze_job.slurm` | **analyze** | ❌ `hpg-default` | Runs `analyze_valence.py` for the **subject** split (the only split). Inference-only, minutes. Produces the valence numbers + figures. |
+| 3 | `classifier_results.slurm` | **analyze** | ❌ `hpg-default` | **All-in-one results job.** Runs `analyze_valence.py` for the subject split in a single submission. The easiest way to refresh every result/figure at once. |
 | — | `ssrnn_job.slurm` | legacy | ✅ | Trains the **original simulation demo** (`array_hidden8.py`), 5-fold array. Template/reference; has `GROUP/QOS/GPU_TYPE` placeholders, not the respiration run. |
 | — | `ssrnn_job_cpu.slurm` | legacy | ❌ | Same demo, CPU-only. Reference. |
 
-Typical flow: **1 → 2 → 4** (or **3** for a single split). The runbook
+Typical flow: **1 → 3** (or **2** for just the analyze step). The runbook
 ([07_experiment_runbook.md](07_experiment_runbook.md)) walks each one.
 
 ---

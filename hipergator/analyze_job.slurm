@@ -5,10 +5,9 @@
 #   (A) recording-level breathing-rate / switch-rate test (leakage-free)  -> stdout/log
 #   (B) pooled latent PCA colored by valence                              -> respiration/plot/
 #
-# Submit from the repo root:
-#   sbatch hipergator/analyze_job.slurm            # leave-one-recording-out folds (15)
-#   sbatch hipergator/analyze_job.slurm subject    # leave-one-subject-out folds (4, leakage-free
-#                                                  #   across individuals -- run the LOSO training first)
+# Submit from the repo root (subject = leave-one-subject-out is the only split):
+#   sbatch hipergator/analyze_job.slurm            # leakage-free across individuals
+#                                                  #   (run the LOSO training first)
 # Watch it:
 #   squeue -u $USER ;  tail -f logs/analyze_*.log
 # =============================================================================
@@ -32,5 +31,5 @@ cd /home/t.heeps/blue_npadillacoreano/npadillacoreano/share/respiration-project/
 mkdir -p logs
 
 CFG=respiration/config_respiration_hpg.yaml
-SPLIT=${1:-recording}          # 'recording' (default) or 'subject'
+SPLIT=${1:-subject}            # only 'subject' (leave-one-subject-out) is supported now
 python respiration/analyze_valence.py --config $CFG --split $SPLIT --pca_fold 0
