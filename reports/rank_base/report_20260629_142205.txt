@@ -1,0 +1,110 @@
+==============================================================================
+RUN REPORT — RANK (cagemate)   |   cohort: rank_base   |   split: leave-one-cage-out
+generated: 20260629_142205   config: respiration/rank/config_rank_hpg.yaml
+==============================================================================
+
+## 1. RUN CONFIG
+  experiment=RANK (cagemate)  cohort=rank_base  cross-validation=leave-one-cage-out
+  preprocess: target_fs=50Hz  bandpass 0.1-20Hz  window=30.0s (T=1500)  top-10 sniffing/recording
+  dead-signal removal: True  (rel_thresh=0.25, p75.0, max_window_dead_frac=0.2)
+  rank filters: min_sniff_bouts=5  force_include=[]  exclude_cages=[]  max_bout_sec=30.0
+  model: num_tv=4  hidden=8  epochs=2000  lr=0.001  coef_cross=0.0  seed=131
+
+## 2. DATA
+  observations: (70, 1500, 1)  (n_windows, T, D)  -> respiration/data_prepared_rank/observations.npy
+  windows: 70  (30 Dominant / 40 Subordinate)
+  recordings: 7   cages: 4 ['1', '2', '3', '4']  (leave-one-cage-out)
+  window dead-fraction: mean=0.002  max=0.100  (2/70 windows contain some dead signal)
+  recording names: CM_s1_1_d1_2_20250623_111352, CM_s1_2_sub1_1_20250623_133932, CM_s2_3_d2_4_20250623_151153, CM_s2_4_sub2_3_20250623_143348, CM_s3_5_d3_6_20250623_160001, CM_s4_7_d4_8_20250623_193718, CM_s4_8_sub4_7_20250623_182649
+
+## 3. TRAINING (held-out reconstruction)
+  per-fold final held-out reconstruction MSE  (from respiration/result_rank/progress_cage_fold*.csv):
+    fold     final_MSE    final_loss  epochs
+    fold0     0.002808      377789.8    1999
+    fold1     0.005947     3415276.0    1999
+    fold2     0.007453     5777707.0    1999
+    fold3     0.004695     4829918.5    1999
+    MEAN      0.005226   (min 0.002808, max 0.007453, n=4 folds)
+
+## 4. EVALUATION (decode / ROC-AUC / permutation / LDA)
+  [source: embedded log logs/rank_classifier_35976172.log]
+############################################################
+### analyze_rank.py  --split cage  (leave-one-cage-out)
+############################################################
+analyzing split='cage': found 4 fold checkpoints
+
+========================================================================
+(A) RECORDING-LEVEL breathing rate  (leakage-free: each recording scored by the
+    fold that held ITS CAGE out; split='cage').  breathing_Hz = switch_rate*fs/2  (fs=50)
+========================================================================
+
+  recording                      rank         n_win  switch_rate  breathing_Hz
+  CM_s1_2_sub1_1_20250623_133932 Dominant        10        0.233          5.81
+  CM_s2_4_sub2_3_20250623_143348 Dominant        10        0.300          7.49
+  CM_s4_8_sub4_7_20250623_182649 Dominant        10        0.292          7.31
+  CM_s1_1_d1_2_20250623_111352   Subordinate     10        0.289          7.22
+  CM_s2_3_d2_4_20250623_151153   Subordinate     10        0.307          7.68
+  CM_s3_5_d3_6_20250623_160001   Subordinate     10        0.320          8.00
+  CM_s4_7_d4_8_20250623_193718   Subordinate     10        0.292          7.29
+
+  Dominant    breathing_Hz: mean=6.87  range=[5.81, 7.49]
+  Subordinate breathing_Hz: mean=7.55  range=[7.22, 8.00]
+  ROC-AUC (breathing rate -> rank, n=7 recordings) = 0.333
+  (0.5 = rate carries no rank signal; n is small -> suggestive pilot, not significance)
+
+========================================================================
+(B) POOLED LATENT PCA -- all recordings through the fold-0 model
+========================================================================
+  saved -> ./respiration/plot_rank/pooled_latent_pca_by_rank.png
+  70 windows: 30 Dominant / 40 Subordinate
+
+========================================================================
+(C) RANK SIGNAL BEYOND BREATHING RATE
+    leave-one-cage-out decoding; PCA/latent model = fold-0
+========================================================================
+  feature                              LOCO(cage)
+  1. rate only (switch rate)                0.604
+  2. full latent h                          0.446
+  3. latent h, RATE regressed out           0.550
+  (chance=0.5; LOCO uses only n=4 cage groups -> coarse, treat as pilot)
+  if the rate-removed latent (row 3) collapses to ~chance, any apparent signal
+  was rate/identity leakage, not rank that generalizes across cages.
+
+========================================================================
+(D) PERMUTATION TEST  (LOCO-by-cage; n_perm=1000, labels shuffled at recording level)
+========================================================================
+  full latent h            observed=0.446  null mean=0.360 sd=0.156  p=0.3906
+  latent h, rate removed   observed=0.550  null mean=0.357 sd=0.156  p=0.1768
+  saved -> ./respiration/plot_rank/permutation_test_cage.png
+  p = fraction of 1000 label-shuffles with balanced-acc >= observed
+  (n=4 cage groups -> coarse; p is honest about that)
+
+========================================================================
+(E) LDA PROJECTION  (supervised separating axis, LOCO-by-cage, leakage-aware)
+========================================================================
+  saved -> ./respiration/plot_rank/lda_projection_cage.png
+  left = per-window score by rank; right = per-recording means (the unit that
+  matters). Projection is leave-one-cage-out, so separation here is not circular.
+
+========================================================================
+(F) PERMUTATION TEST on the per-recording LDA separation (LOCO-by-cage)
+========================================================================
+  statistic = ROC-AUC(per-recording mean LDA score, rank), n=7 recordings
+  observed AUC = 0.667   null mean = 0.477 sd = 0.316   p = 0.3976
+  saved -> ./respiration/plot_rank/lda_permutation_cage.png
+  (n=7 recordings -> coarse; the AUC takes few distinct values, so p is granular)
+
+DONE. Figures in respiration/plot_rank/ ; numbers above in this log.
+
+## 5. ARTIFACTS (relative to repo root)
+  figures (7) in respiration/plot_rank/:
+    - respiration/plot_rank/latent_pca.png
+    - respiration/plot_rank/lda_permutation_cage.png
+    - respiration/plot_rank/lda_projection_cage.png
+    - respiration/plot_rank/permutation_test_cage.png
+    - respiration/plot_rank/pooled_latent_pca_by_rank.png
+    - respiration/plot_rank/resp_recon.png
+    - respiration/plot_rank/states.png
+  checkpoints: respiration/result_rank/  (resp_srnn_cage_h8_fold*.pt)
+  prepared data: respiration/data_prepared_rank/
+  config: respiration/rank/config_rank_hpg.yaml

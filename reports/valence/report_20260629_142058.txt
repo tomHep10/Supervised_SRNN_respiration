@@ -1,0 +1,122 @@
+==============================================================================
+RUN REPORT — VALENCE   |   cohort: valence   |   split: leave-one-subject-out
+generated: 20260629_142058   config: respiration/valence/config_respiration_hpg.yaml
+==============================================================================
+
+## 1. RUN CONFIG
+  experiment=VALENCE  cohort=valence  cross-validation=leave-one-subject-out
+  preprocess: target_fs=50Hz  bandpass 0.1-20Hz  window=30.0s (T=1500)  top-10 sniffing/recording
+  dead-signal removal: True  (rel_thresh=0.25, p75.0, max_window_dead_frac=0.2)
+  model: num_tv=4  hidden=8  epochs=2000  lr=0.001  coef_cross=0.0  seed=131
+
+## 2. DATA
+  observations: (147, 1500, 1)  (n_windows, T, D)  -> respiration/data_prepared/observations.npy
+  windows: 147  (70 positive(RI1) / 77 negative(RI2))
+  recordings: 15   subjects: 8  (leave-one-subject-out)
+  window dead-fraction: mean=0.006  max=0.193  (6/147 windows contain some dead signal)
+  recordings: RI1_s1_1, RI1_s1_2, RI1_s2_3, RI1_s2_4, RI1_s3_6, RI1_s4_7, RI1_s4_8, RI2_s1_1, RI2_s1_2, RI2_s2_3, RI2_s2_4, RI2_s3_5, RI2_s3_6, RI2_s4_7, RI2_s4_8
+
+## 3. TRAINING (held-out reconstruction)
+  per-fold final held-out reconstruction MSE  (from respiration/result/progress_subject_fold*.csv):
+    fold     final_MSE    final_loss  epochs
+    fold0     0.013761     3624862.2    1999
+    fold1     0.002536     5079192.5    1999
+    fold2     0.020521    20627114.0    1999
+    fold3     0.012259       42746.3    1999
+    fold4     0.005540     2613437.5    1999
+    fold5     0.003261     1132602.9    1999
+    fold6     0.005920    10487510.0    1999
+    fold7     0.010101     3375073.8    1999
+    MEAN      0.009237   (min 0.002536, max 0.020521, n=8 folds)
+
+## 4. EVALUATION (decode / ROC-AUC / permutation / LDA)
+  [source: embedded log logs/classifier_35946644.log]
+############################################################
+### analyze_valence.py  --split subject  (leave-one-subject-out)
+############################################################
+/blue/npadillacoreano/t.heeps/.conda/envs/SSRNN/lib/python3.11/site-packages/torch/nn/modules/transformer.py:392: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  warnings.warn(
+/blue/npadillacoreano/t.heeps/.conda/envs/SSRNN/lib/python3.11/site-packages/torch/nn/modules/transformer.py:392: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  warnings.warn(
+/blue/npadillacoreano/t.heeps/.conda/envs/SSRNN/lib/python3.11/site-packages/torch/nn/modules/transformer.py:392: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  warnings.warn(
+analyzing split='subject': found 8 fold checkpoints
+
+========================================================================
+(A) RECORDING-LEVEL breathing rate  (leakage-free: each recording is scored by
+    the fold that held it out; split='subject').  breathing_Hz = switch_rate*fs/2  (fs=50)
+========================================================================
+
+  recording    valence   n_win  switch_rate  breathing_Hz
+  RI1_s1_1     pos(RI1)     10        0.317          7.92
+  RI1_s1_2     pos(RI1)     10        0.298          7.44
+  RI1_s2_3     pos(RI1)     10        0.332          8.30
+  RI1_s2_4     pos(RI1)     10        0.354          8.86
+  RI1_s3_6     pos(RI1)     10        0.303          7.58
+  RI1_s4_7     pos(RI1)     10        0.316          7.91
+  RI1_s4_8     pos(RI1)     10        0.301          7.53
+  RI2_s1_1     neg(RI2)     10        0.260          6.51
+  RI2_s1_2     neg(RI2)     10        0.277          6.92
+  RI2_s2_3     neg(RI2)     10        0.291          7.27
+  RI2_s2_4     neg(RI2)     10        0.272          6.80
+  RI2_s3_5     neg(RI2)      7        0.231          5.77
+  RI2_s3_6     neg(RI2)     10        0.239          5.97
+  RI2_s4_7     neg(RI2)     10        0.272          6.81
+  RI2_s4_8     neg(RI2)     10        0.240          6.01
+
+  positive breathing_Hz: mean=7.93  range=[7.44, 8.86]
+  negative breathing_Hz: mean=6.51  range=[5.77, 7.27]
+  separation gap (min_pos - max_neg) = +0.17 Hz  (>0 => perfectly separable)
+  ROC-AUC (breathing rate -> valence, n=15 recordings) = 1.000
+  (n is small -> treat as a suggestive pilot, not significance)
+
+========================================================================
+(B) POOLED LATENT PCA -- all recordings through the fold-0 model
+========================================================================
+  saved -> ./respiration/plot/pooled_latent_pca_by_valence.png
+  147 windows: 70 pos / 77 neg
+
+========================================================================
+(C) VALENCE SIGNAL BEYOND BREATHING RATE
+    leave-one-subject-out decoding; PCA/latent model = fold-0
+========================================================================
+  feature                              LOSO(subject)
+  1. rate only (switch rate)                   0.706
+  2. full latent h                             0.762
+  3. latent h, RATE regressed out              0.756
+  (chance=0.5; LOSO uses only n=8 subject groups -> coarse, treat as pilot)
+  if the rate-removed latent (row 3) collapses to ~chance, the apparent signal
+  was individual-respiration leakage, not valence that generalizes across animals.
+
+========================================================================
+(D) PERMUTATION TEST  (LOSO-by-subject; n_perm=1000, labels shuffled at recording level)
+========================================================================
+  full latent h            observed=0.762  null mean=0.387 sd=0.118  p=0.0010
+  latent h, rate removed   observed=0.756  null mean=0.393 sd=0.112  p=0.0010
+  saved -> ./respiration/plot/permutation_test_subject.png
+  p = fraction of 1000 label-shuffles with balanced-acc >= observed
+  (n=8 subject groups -> coarse; p is honest about that)
+
+========================================================================
+(E) LDA PROJECTION  (supervised separating axis, LOSO-by-subject, leakage-aware)
+========================================================================
+  saved -> ./respiration/plot/lda_projection_subject.png
+  left = per-window score by valence; right = per-recording means (the unit that
+  matters). Projection is leave-one-subject-out, so separation here is not circular.
+
+DONE. Figures in respiration/plot/ ; numbers above in this log.
+
+
+## 5. ARTIFACTS (relative to repo root)
+  figures (8) in respiration/plot/:
+    - respiration/plot/latent_pca.png
+    - respiration/plot/lda_projection_recording.png
+    - respiration/plot/lda_projection_subject.png
+    - respiration/plot/permutation_test_recording.png
+    - respiration/plot/permutation_test_subject.png
+    - respiration/plot/pooled_latent_pca_by_valence.png
+    - respiration/plot/resp_recon.png
+    - respiration/plot/states.png
+  checkpoints: respiration/result/  (resp_srnn_subject_h8_fold*.pt)
+  prepared data: respiration/data_prepared/
+  config: respiration/valence/config_respiration_hpg.yaml

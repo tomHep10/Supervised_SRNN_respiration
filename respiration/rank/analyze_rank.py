@@ -200,6 +200,45 @@ def main():
         print("  left = per-window score by rank; right = per-recording means (the unit that")
         print("  matters). Projection is leave-one-cage-out, so separation here is not circular.")
 
+        # ----------------- (F) permutation test on the per-recording LDA separation -----------------
+        # (E)'s right panel is the eyeball test; this asks whether that separation beats chance.
+        # Statistic = ROC-AUC of per-recording mean LDA score vs rank. Null: shuffle rank at the
+        # RECORDING level, REFIT the leave-one-cage-out LDA on the shuffled labels (so the whole
+        # supervised pipeline is re-run -> not circular), recompute the per-recording AUC.
+        if args.n_perm > 0:
+            recs_u = np.unique(rid_all)
+            rec_rank_true = np.array([rank[rid_all == r][0] for r in recs_u])
+
+            def rec_lda_auc(window_rank):
+                s = logo_lda_scores(lat, window_rank, cage_all)
+                rm = np.array([s[rid_all == r].mean() for r in recs_u])
+                rr = np.array([window_rank[rid_all == r][0] for r in recs_u])
+                return roc_auc_score(rr, rm)
+
+            obs_auc = rec_lda_auc(rank)
+            rng = np.random.RandomState(131)
+            null = np.empty(args.n_perm)
+            for i in range(args.n_perm):
+                mp = dict(zip(recs_u, rng.permutation(rec_rank_true)))
+                null[i] = rec_lda_auc(np.array([mp[r] for r in rid_all]))
+            p = (1.0 + np.sum(null >= obs_auc)) / (1.0 + args.n_perm)
+            print("\n" + "=" * 72)
+            print("(F) PERMUTATION TEST on the per-recording LDA separation (LOCO-by-cage)")
+            print("=" * 72)
+            print(f"  statistic = ROC-AUC(per-recording mean LDA score, rank), n={len(recs_u)} recordings")
+            print(f"  observed AUC = {obs_auc:.3f}   null mean = {null.mean():.3f} sd = {null.std():.3f}   p = {p:.4f}")
+            fig, ax = plt.subplots(figsize=(5, 4))
+            ax.hist(null, bins=30, color="#bbbbbb", edgecolor="white")
+            ax.axvline(0.5, color="k", ls=":", lw=1, label="chance = 0.5")
+            ax.axvline(obs_auc, color="#d62728", lw=2.2, label=f"observed = {obs_auc:.3f}\np = {p:.4f}")
+            ax.set_title("Per-recording LDA separation\n(LOCO-by-cage; rank shuffled at recording level)")
+            ax.set_xlabel("ROC-AUC (per-recording mean LDA vs rank)"); ax.set_ylabel("# permutations")
+            ax.legend(fontsize=8, loc="upper left")
+            out_png = os.path.join(paths["plot_dir"], f"lda_permutation_{args.split}.png")
+            plt.tight_layout(); plt.savefig(out_png, dpi=150); plt.close()
+            print(f"  saved -> {out_png}")
+            print(f"  (n={len(recs_u)} recordings -> coarse; the AUC takes few distinct values, so p is granular)")
+
 
 if __name__ == "__main__":
     main()

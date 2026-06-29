@@ -31,11 +31,11 @@ conda activate SSRNN
 cd /home/t.heeps/blue_npadillacoreano/npadillacoreano/share/respiration-project/Supervised_SRNN_respiration
 mkdir -p logs
 
-CFG=respiration/rank/config_rank_hpg.yaml
+CFG=${1:-respiration/rank/config_rank_hpg.yaml}   # pass a cohort config as arg 1 to run a different cohort
 
 python respiration/rank/prepare_rank.py --config $CFG
 
 echo ""
 echo "=== observations shape ==="
-python -c "import numpy as np; print(np.load('respiration/data_prepared_rank/observations.npy').shape)"
+python -c "import yaml,os,numpy as np; p=yaml.safe_load(open('$CFG'))['paths']['out_dir']; print(np.load(os.path.join(p,'observations.npy')).shape)"
 echo "DONE. Inspect window counts / rank balance above before submitting LOCO training."

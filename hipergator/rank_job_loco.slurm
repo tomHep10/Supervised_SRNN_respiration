@@ -35,7 +35,7 @@ conda activate SSRNN
 cd /home/t.heeps/blue_npadillacoreano/npadillacoreano/share/respiration-project/Supervised_SRNN_respiration
 mkdir -p logs
 
-CFG=respiration/rank/config_rank_hpg.yaml
+CFG=${1:-respiration/rank/config_rank_hpg.yaml}   # pass a cohort config as arg 1 to run a different cohort
 
 # data_prepared_rank/ must already exist (build it first: sbatch hipergator/prepare_rank.slurm).
 python respiration/train_respiration.py --config $CFG --fold $SLURM_ARRAY_TASK_ID --split cage

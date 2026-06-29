@@ -31,12 +31,15 @@ conda activate SSRNN
 cd /home/t.heeps/blue_npadillacoreano/npadillacoreano/share/respiration-project/Supervised_SRNN_respiration
 mkdir -p logs
 
-CFG=respiration/rank/config_rank_hpg.yaml
+CFG=${1:-respiration/rank/config_rank_hpg.yaml}   # pass a cohort config as arg 1 to run a different cohort
 
 echo "############################################################"
 echo "### analyze_rank.py  --split cage  (leave-one-cage-out)"
 echo "############################################################"
 python respiration/rank/analyze_rank.py --config $CFG --split cage --pca_fold 0
 
+# consolidate config + data + per-fold MSE + this analysis into one report .txt
+python respiration/make_report.py --config $CFG --analysis-log logs/rank_classifier_${SLURM_JOB_ID}.log
+
 echo ""
-echo "DONE. Figures in respiration/plot_rank/ ; numbers above in this log."
+echo "DONE. Figures in respiration/plot_rank/ ; full report in reports/<cohort>/report_latest.txt"

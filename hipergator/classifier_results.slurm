@@ -47,5 +47,8 @@ echo "### analyze_valence.py  --split subject  (leave-one-subject-out)"
 echo "############################################################"
 python respiration/valence/analyze_valence.py --config $CFG --split subject --pca_fold 0
 
+# consolidate config + data + per-fold MSE + this analysis into one report .txt
+python respiration/make_report.py --config $CFG --analysis-log logs/classifier_${SLURM_JOB_ID}.log
+
 echo ""
-echo "DONE. Figures in respiration/plot/ ; numbers above in this log."
+echo "DONE. Figures in respiration/plot/ ; full report in reports/valence/report_latest.txt"

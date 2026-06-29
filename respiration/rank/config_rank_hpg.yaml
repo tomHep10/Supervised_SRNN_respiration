@@ -5,7 +5,12 @@
 #   - data = cagemate baseline recordings (CM_*),
 #   - target = RANK (Dominant/Subordinate) from rank_map below (not valence-from-prefix),
 #   - cross-validation = leave-one-CAGE-out (animals interact only with cagemates).
-# Use on HPG:  --config respiration/config_rank_hpg.yaml
+# Use on HPG:  --config respiration/rank/config_rank_hpg.yaml
+# This is the BASE cohort (7 recordings: s3_6 dropped for having no behavior). Other cohorts
+# (e.g. config_rank_incl_s3_6.yaml) are sibling configs with their own output dirs, so results
+# never overwrite across cohorts.
+
+cohort: "rank_base"
 
 paths:
   # Cagemate respiration H5s and BORIS exports (separate trees from the valence data).
