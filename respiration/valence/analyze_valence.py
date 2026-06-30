@@ -16,10 +16,16 @@ Two leakage-aware analyses the per-fold plots / the old cross-fold decoder can't
       Per-fold PCAs only show the single held-out recording (one valence), and
       latents are NOT comparable across separately-trained folds (rotation/
       permutation/sign/scale non-identifiability). So we run ALL windows of ALL
-      recordings through a SINGLE model and PCA the per-window mean latent, colored
-      by valence. This is descriptive geometry (the one model trained on most of
-      these recordings) -- it answers "do valences separate in the latent?", it is
-      NOT a leakage-free decoding claim. The clean leakage-free number is (A).
+      recordings through a SINGLE model and PCA the latents, colored by valence.
+      This is descriptive geometry (the one model trained on most of these
+      recordings) -- it answers "do valences separate in the latent?", it is NOT a
+      leakage-free decoding claim. The clean leakage-free number is (A).
+
+  NOTE (per-timestep): (B)-(E) no longer average each window's 1500 latents to a single
+      vector. They use EVERY timestep's latent (~1500 per window), repeating each window's
+      valence / subject / recording id across its timesteps so rows stay aligned. This
+      keeps the within-window trajectory instead of collapsing it. --latent_stride>1
+      subsamples timesteps if the per-timestep decode/permutation is too slow.
 
 CPU only, inference only. Run via hipergator/analyze_job.slurm, or:
     python respiration/analyze_valence.py --config respiration/config_respiration_hpg.yaml
@@ -40,6 +46,13 @@ from sklearn.linear_model import LogisticRegression, LinearRegression
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import LeaveOneGroupOut
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+from joblib import Parallel, delayed
+
+
+def n_jobs():
+    """Cores for the permutation fan-out; honors the SLURM allocation so we don't
+    oversubscribe (-1 = all cores off-cluster). Raise --cpus-per-task to go faster."""
+    return int(os.environ.get("SLURM_CPUS_PER_TASK", "0")) or -1
 
 
 def load_ckpt(path, h, device):
@@ -105,6 +118,29 @@ def per_window_mean_latent(rnninfer, y):
     return mean_out.cpu().numpy().mean(axis=1)            # (n,h)
 
 
+def per_timestep_latent(rnninfer, y, stride=1):
+    """EVERY inferred latent, NOT averaged over the window. Where per_window_mean_latent
+    collapses a window's T (=1500) timesteps to one mean vector, this keeps each timestep,
+    returning latents flattened to (n_windows * T_kept, h) -- ~1500 latents per window. Pair
+    it with expand_to_timesteps() on any per-window metadata so rows stay aligned.
+    stride>1 keeps every stride-th timestep to cut compute. Returns (latent_flat, T_kept)."""
+    rnninfer.eval()
+    with torch.no_grad():
+        _, _, mean_out = rnninfer(y)                       # (n, T, h)
+    lat = mean_out.cpu().numpy()
+    if stride > 1:
+        lat = lat[:, ::stride, :]
+    n, T_kept, h = lat.shape
+    return lat.reshape(n * T_kept, h), T_kept             # row order: win0 t0..tT, win1 t0..
+
+
+def expand_to_timesteps(arr, T_kept):
+    """Repeat each per-window value T_kept times so per-window metadata (labels, groups,
+    recording ids, a per-window covariate) lines up with the flattened per-timestep latents
+    from per_timestep_latent(). Row order matches that flattening."""
+    return np.repeat(np.asarray(arr), T_kept, axis=0)
+
+
 def logo_decode(X, y, groups, residualize=None):
     """Leave-one-group-out balanced accuracy for valence.
     If `residualize` (a 1-D per-window covariate, e.g. switch/breathing rate) is
@@ -142,11 +178,15 @@ def permutation_test(X, val_window, rid_window, groups, n_perm, seed, residualiz
     recs = np.unique(rid_window)
     rec_val = np.array([val_window[rid_window == r][0] for r in recs])   # one label per recording
     rng = np.random.RandomState(seed)
-    null = np.empty(n_perm)
-    for i in range(n_perm):
+    # Pre-generate every shuffled label vector SERIALLY (cheap; keeps the RNG deterministic
+    # regardless of core count), then fan the expensive LOGO decodes out across cores.
+    # joblib auto-memmaps the big constant arrays so they're shared, not re-pickled.
+    perms = []
+    for _ in range(n_perm):
         mapping = dict(zip(recs, rng.permutation(rec_val)))
-        y_perm = np.array([mapping[r] for r in rid_window])
-        null[i] = logo_decode(X, y_perm, groups, residualize=residualize)
+        perms.append(np.array([mapping[r] for r in rid_window]))
+    null = np.asarray(Parallel(n_jobs=n_jobs())(
+        delayed(logo_decode)(X, y_perm, groups, residualize=residualize) for y_perm in perms))
     p = (1.0 + np.sum(null >= obs)) / (1.0 + n_perm)                     # one-sided, +1 smoothing
     return obs, null, p
 
@@ -176,6 +216,10 @@ def main():
                     help="which fold's trained model to use for the pooled PCA")
     ap.add_argument("--n_perm", type=int, default=1000,
                     help="label shuffles for the permutation test (part D); 0 to skip")
+    ap.add_argument("--latent_stride", type=int, default=1,
+                    help="keep every Nth timestep of the per-window latent trajectory "
+                         "(1 = every latent, ~1500/window). Raise it to subsample timesteps "
+                         "if the per-timestep decode/permutation is too slow.")
     args = ap.parse_args()
     cfg = yaml.safe_load(open(args.config))
     paths = cfg["paths"]; h = int(cfg["model"]["hidden_shape"])
@@ -243,18 +287,32 @@ def main():
 
     pca_ckpt = os.path.join(paths["save_dir"], f"resp_srnn_{args.split}_h{h}_fold{args.pca_fold}.pt")
     _, model, rnninfer = load_ckpt(pca_ckpt, h, device)
-    lat = per_window_mean_latent(rnninfer, y_all)         # (n_windows, h)
+    # EVERY timestep's latent (not the per-window mean): ~1500 latents per window. The
+    # per-window labels / subject groups / recording ids are repeated per timestep so the
+    # rows stay aligned. All of (B)-(E) below run on these per-timestep rows.
+    lat, T_kept = per_timestep_latent(rnninfer, y_all, stride=args.latent_stride)  # (n_win*T_kept, h)
+    valence_ts = expand_to_timesteps(valence, T_kept)
+    subj_ts = expand_to_timesteps(subj_all, T_kept)
+    rid_ts = expand_to_timesteps(rid_all, T_kept)
+    print(f"  per-timestep latents: {lat.shape[0]} rows "
+          f"({len(valence)} windows x {T_kept} kept timesteps, stride={args.latent_stride})")
     pcs = PCA(n_components=2).fit_transform(lat)
 
     os.makedirs(paths["plot_dir"], exist_ok=True)
+    # 220k points would make an unreadable, huge PNG -> fit PCA on all, scatter a random subset
+    rng_plot = np.random.RandomState(0)
     fig, ax = plt.subplots(figsize=(6, 5))
     for v, c, lbl in [(1, "#1b7837", "positive (RI1)"), (0, "#762a83", "negative (RI2)")]:
-        m = valence == v
-        ax.scatter(pcs[m, 0], pcs[m, 1], s=45, alpha=0.75, color=c, label=lbl,
-                   edgecolor="k", linewidth=0.3)
-    ax.set_title(f"Pooled latent PCA (per-window mean h, fold-{args.pca_fold} model)\n"
+        m = np.where(valence_ts == v)[0]
+        if len(m) > 15000:
+            m = rng_plot.choice(m, 15000, replace=False)
+        ax.scatter(pcs[m, 0], pcs[m, 1], s=4, alpha=0.25, color=c, label=lbl, linewidth=0)
+    ax.set_title(f"Pooled latent PCA (per-timestep h, fold-{args.pca_fold} model)\n"
                  "one coordinate system; color = valence")
-    ax.set_xlabel("PC1"); ax.set_ylabel("PC2"); ax.legend()
+    ax.set_xlabel("PC1"); ax.set_ylabel("PC2")
+    leg = ax.legend()
+    for lh in getattr(leg, "legend_handles", getattr(leg, "legendHandles", [])):
+        lh.set_alpha(1)
     out_png = os.path.join(paths["plot_dir"], "pooled_latent_pca_by_valence.png")
     plt.tight_layout(); plt.savefig(out_png, dpi=150); plt.close()
     print(f"  saved -> {out_png}")
@@ -274,13 +332,14 @@ def main():
         print("(C) VALENCE SIGNAL BEYOND BREATHING RATE")
         print(f"    leave-one-subject-out decoding; PCA/latent model = fold-{args.pca_fold}")
         print("=" * 72)
-        swr_all = per_window_switch_rate(model, rnninfer, y_all, device)   # rate proxy, same model
+        swr_all = per_window_switch_rate(model, rnninfer, y_all, device)   # per-window rate proxy
+        swr_ts = expand_to_timesteps(swr_all, T_kept)                      # broadcast to timesteps
         n_subj = len(np.unique(subj_all))
         print(f"  {'feature':34s} {'LOSO(subject)':>15s}")
-        for label, X, resid in [("1. rate only (switch rate)", swr_all, None),
+        for label, X, resid in [("1. rate only (switch rate)", swr_ts, None),
                                  ("2. full latent h", lat, None),
-                                 ("3. latent h, RATE regressed out", lat, swr_all)]:
-            a_subj = logo_decode(X, valence, subj_all, residualize=resid)
+                                 ("3. latent h, RATE regressed out", lat, swr_ts)]:
+            a_subj = logo_decode(X, valence_ts, subj_ts, residualize=resid)
             print(f"  {label:34s} {a_subj:15.3f}")
         print(f"  (chance=0.5; LOSO uses only n={n_subj} subject groups -> coarse, treat as pilot)")
         print("  if the rate-removed latent (row 3) collapses to ~chance, the apparent signal")
@@ -293,10 +352,10 @@ def main():
                   "labels shuffled at recording level)")
             print("=" * 72)
             tests = [("full latent h", lat, None),
-                     ("latent h, rate removed", lat, swr_all)]
+                     ("latent h, rate removed", lat, swr_ts)]
             fig, axes = plt.subplots(1, len(tests), figsize=(5 * len(tests), 4), squeeze=False)
             for ax, (name, X, resid) in zip(axes[0], tests):
-                obs, null, p = permutation_test(X, valence, rid_all, subj_all,
+                obs, null, p = permutation_test(X, valence_ts, rid_ts, subj_ts,
                                                 args.n_perm, seed=131, residualize=resid)
                 ax.hist(null, bins=30, color="#bbbbbb", edgecolor="white")
                 ax.axvline(0.5, color="k", ls=":", lw=1, label="chance = 0.5")
@@ -319,18 +378,19 @@ def main():
         print("\n" + "=" * 72)
         print("(E) LDA PROJECTION  (supervised separating axis, LOSO-by-subject, leakage-aware)")
         print("=" * 72)
-        ld = loso_lda_scores(lat, valence, subj_all)          # one score per window
+        ld = loso_lda_scores(lat, valence_ts, subj_ts)        # one score per TIMESTEP
         green, purple = "#1b7837", "#762a83"
         fig, (axh, axr) = plt.subplots(1, 2, figsize=(11, 4))
-        # left: per-window LDA score distribution by valence
+        # left: per-timestep LDA score distribution by valence
         for v, c, lbl in [(1, green, "positive (RI1)"), (0, purple, "negative (RI2)")]:
-            axh.hist(ld[valence == v], bins=25, alpha=0.6, color=c, label=lbl, edgecolor="white")
-        axh.set_title("Per-window LDA score by valence\n(held-out projection)")
-        axh.set_xlabel("LDA discriminant score"); axh.set_ylabel("# windows"); axh.legend(fontsize=8)
+            axh.hist(ld[valence_ts == v], bins=40, alpha=0.6, color=c, label=lbl,
+                     edgecolor="none", density=True)
+        axh.set_title("Per-timestep LDA score by valence\n(held-out projection)")
+        axh.set_xlabel("LDA discriminant score"); axh.set_ylabel("density"); axh.legend(fontsize=8)
         # right: per-recording mean LDA score (the independent unit), jittered by valence
-        recs = np.unique(rid_all)
-        rec_mean = np.array([ld[rid_all == r].mean() for r in recs])
-        rec_val = np.array([valence[rid_all == r][0] for r in recs])
+        recs = np.unique(rid_ts)
+        rec_mean = np.array([ld[rid_ts == r].mean() for r in recs])
+        rec_val = np.array([valence_ts[rid_ts == r][0] for r in recs])
         rng = np.random.RandomState(0)
         for v, c in [(1, green), (0, purple)]:
             m = rec_val == v

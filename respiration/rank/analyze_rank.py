@@ -16,6 +16,11 @@ test). Reuses the shared, target-agnostic helpers in ../srnn_analysis.py.
   (D) PERMUTATION TEST (LOCO-by-cage), labels shuffled at the recording level.
   (E) LDA projection (leave-one-cage-out, leakage-aware).
 
+NOTE (per-timestep): (B)-(F) no longer average each window's 1500 latents to a single
+  vector. They use EVERY timestep's latent (~1500 per window), repeating each window's
+  rank / cage / recording id across its timesteps so rows stay aligned. --latent_stride>1
+  subsamples timesteps if the per-timestep decode/permutation is too slow.
+
 CPU only, inference only. Run via hipergator/analyze_rank.slurm, or:
     python respiration/rank/analyze_rank.py --config respiration/rank/config_rank_hpg.yaml
 """
@@ -29,17 +34,34 @@ import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # respiration/ (for srnn_analysis)
 from srnn_analysis import (load_ckpt, per_window_switch_rate, per_window_mean_latent,
+                           per_timestep_latent, expand_to_timesteps,
                            logo_decode, permutation_test, logo_lda_scores)
 from sklearn.decomposition import PCA
 from sklearn.metrics import roc_auc_score
+from joblib import Parallel, delayed
 
 DOM, SUB = "#b2182b", "#2166ac"          # Dominant / Subordinate colors
 RANK_HI, RANK_LO = "Dominant", "Subordinate"   # label 1 / label 0
 
 
+def n_jobs():
+    """Cores for the permutation fan-out; honors the SLURM allocation (-1 = all off-cluster)."""
+    return int(os.environ.get("SLURM_CPUS_PER_TASK", "0")) or -1
+
+
 def cage_of(names):
     """Per-recording cage = the leading index of the sCAGE_ANIMAL token (e.g. 's1_2' -> '1')."""
     return np.array([re.search(r"s(\d+)_\d+", str(s)).group(1) for s in names])
+
+
+def rec_lda_auc(lat, ts_rank, cage_ts, rid_ts, recs_u):
+    """ROC-AUC of per-recording mean (leave-one-cage-out) LDA score vs rank. Top-level (not a
+    closure) so joblib can memmap the big constant arrays across permutation workers instead
+    of re-pickling them per task."""
+    s = logo_lda_scores(lat, ts_rank, cage_ts)            # per-timestep LDA scores
+    rm = np.array([s[rid_ts == r].mean() for r in recs_u])
+    rr = np.array([ts_rank[rid_ts == r][0] for r in recs_u])
+    return roc_auc_score(rr, rm)
 
 
 def main():
@@ -53,6 +75,10 @@ def main():
                     help="which fold's trained model to use for the pooled PCA")
     ap.add_argument("--n_perm", type=int, default=1000,
                     help="label shuffles for the permutation test (part D); 0 to skip")
+    ap.add_argument("--latent_stride", type=int, default=1,
+                    help="keep every Nth timestep of the per-window latent trajectory "
+                         "(1 = every latent, ~1500/window). Raise it to subsample timesteps "
+                         "if the per-timestep decode/permutation is too slow.")
     args = ap.parse_args()
     cfg = yaml.safe_load(open(args.config))
     paths = cfg["paths"]; h = int(cfg["model"]["hidden_shape"])
@@ -111,18 +137,32 @@ def main():
 
     pca_ckpt = os.path.join(paths["save_dir"], f"resp_srnn_{args.split}_h{h}_fold{args.pca_fold}.pt")
     _, model, rnninfer = load_ckpt(pca_ckpt, h, device)
-    lat = per_window_mean_latent(rnninfer, y_all)         # (n_windows, h)
+    # EVERY timestep's latent (not the per-window mean): ~1500 latents per window. The
+    # per-window rank / cage groups / recording ids are repeated per timestep so the rows
+    # stay aligned. All of (B)-(F) below run on these per-timestep rows.
+    lat, T_kept = per_timestep_latent(rnninfer, y_all, stride=args.latent_stride)  # (n_win*T_kept, h)
+    rank_ts = expand_to_timesteps(rank, T_kept)
+    cage_ts = expand_to_timesteps(cage_all, T_kept)
+    rid_ts = expand_to_timesteps(rid_all, T_kept)
+    print(f"  per-timestep latents: {lat.shape[0]} rows "
+          f"({len(rank)} windows x {T_kept} kept timesteps, stride={args.latent_stride})")
     pcs = PCA(n_components=2).fit_transform(lat)
 
     os.makedirs(paths["plot_dir"], exist_ok=True)
+    # 220k points would make an unreadable, huge PNG -> fit PCA on all, scatter a random subset
+    rng_plot = np.random.RandomState(0)
     fig, ax = plt.subplots(figsize=(6, 5))
     for v, c, lbl in [(1, DOM, RANK_HI), (0, SUB, RANK_LO)]:
-        m = rank == v
-        ax.scatter(pcs[m, 0], pcs[m, 1], s=45, alpha=0.75, color=c, label=lbl,
-                   edgecolor="k", linewidth=0.3)
-    ax.set_title(f"Pooled latent PCA (per-window mean h, fold-{args.pca_fold} model)\n"
+        m = np.where(rank_ts == v)[0]
+        if len(m) > 15000:
+            m = rng_plot.choice(m, 15000, replace=False)
+        ax.scatter(pcs[m, 0], pcs[m, 1], s=4, alpha=0.25, color=c, label=lbl, linewidth=0)
+    ax.set_title(f"Pooled latent PCA (per-timestep h, fold-{args.pca_fold} model)\n"
                  "one coordinate system; color = rank")
-    ax.set_xlabel("PC1"); ax.set_ylabel("PC2"); ax.legend()
+    ax.set_xlabel("PC1"); ax.set_ylabel("PC2")
+    leg = ax.legend()
+    for lh in getattr(leg, "legend_handles", getattr(leg, "legendHandles", [])):
+        lh.set_alpha(1)
     out_png = os.path.join(paths["plot_dir"], "pooled_latent_pca_by_rank.png")
     plt.tight_layout(); plt.savefig(out_png, dpi=150); plt.close()
     print(f"  saved -> {out_png}")
@@ -134,13 +174,14 @@ def main():
         print("(C) RANK SIGNAL BEYOND BREATHING RATE")
         print(f"    leave-one-cage-out decoding; PCA/latent model = fold-{args.pca_fold}")
         print("=" * 72)
-        swr_all = per_window_switch_rate(model, rnninfer, y_all, device)   # rate proxy, same model
+        swr_all = per_window_switch_rate(model, rnninfer, y_all, device)   # per-window rate proxy
+        swr_ts = expand_to_timesteps(swr_all, T_kept)                      # broadcast to timesteps
         n_cage = len(np.unique(cage_all))
         print(f"  {'feature':34s} {'LOCO(cage)':>12s}")
-        for label, X, resid in [("1. rate only (switch rate)", swr_all, None),
+        for label, X, resid in [("1. rate only (switch rate)", swr_ts, None),
                                  ("2. full latent h", lat, None),
-                                 ("3. latent h, RATE regressed out", lat, swr_all)]:
-            a = logo_decode(X, rank, cage_all, residualize=resid)
+                                 ("3. latent h, RATE regressed out", lat, swr_ts)]:
+            a = logo_decode(X, rank_ts, cage_ts, residualize=resid)
             print(f"  {label:34s} {a:12.3f}")
         print(f"  (chance=0.5; LOCO uses only n={n_cage} cage groups -> coarse, treat as pilot)")
         print("  if the rate-removed latent (row 3) collapses to ~chance, any apparent signal")
@@ -153,10 +194,10 @@ def main():
                   "labels shuffled at recording level)")
             print("=" * 72)
             tests = [("full latent h", lat, None),
-                     ("latent h, rate removed", lat, swr_all)]
+                     ("latent h, rate removed", lat, swr_ts)]
             fig, axes = plt.subplots(1, len(tests), figsize=(5 * len(tests), 4), squeeze=False)
             for ax, (name, X, resid) in zip(axes[0], tests):
-                obs_acc, null, p = permutation_test(X, rank, rid_all, cage_all,
+                obs_acc, null, p = permutation_test(X, rank_ts, rid_ts, cage_ts,
                                                     args.n_perm, seed=131, residualize=resid)
                 ax.hist(null, bins=30, color="#bbbbbb", edgecolor="white")
                 ax.axvline(0.5, color="k", ls=":", lw=1, label="chance = 0.5")
@@ -177,15 +218,16 @@ def main():
         print("\n" + "=" * 72)
         print("(E) LDA PROJECTION  (supervised separating axis, LOCO-by-cage, leakage-aware)")
         print("=" * 72)
-        ld = logo_lda_scores(lat, rank, cage_all)             # one score per window
+        ld = logo_lda_scores(lat, rank_ts, cage_ts)           # one score per TIMESTEP
         fig, (axh, axr) = plt.subplots(1, 2, figsize=(11, 4))
         for v, c, lbl in [(1, DOM, RANK_HI), (0, SUB, RANK_LO)]:
-            axh.hist(ld[rank == v], bins=25, alpha=0.6, color=c, label=lbl, edgecolor="white")
-        axh.set_title("Per-window LDA score by rank\n(held-out projection)")
-        axh.set_xlabel("LDA discriminant score"); axh.set_ylabel("# windows"); axh.legend(fontsize=8)
-        recs = np.unique(rid_all)
-        rec_mean = np.array([ld[rid_all == r].mean() for r in recs])
-        rec_rank = np.array([rank[rid_all == r][0] for r in recs])
+            axh.hist(ld[rank_ts == v], bins=40, alpha=0.6, color=c, label=lbl,
+                     edgecolor="none", density=True)
+        axh.set_title("Per-timestep LDA score by rank\n(held-out projection)")
+        axh.set_xlabel("LDA discriminant score"); axh.set_ylabel("density"); axh.legend(fontsize=8)
+        recs = np.unique(rid_ts)
+        rec_mean = np.array([ld[rid_ts == r].mean() for r in recs])
+        rec_rank = np.array([rank_ts[rid_ts == r][0] for r in recs])
         rng = np.random.RandomState(0)
         for v, c in [(1, DOM), (0, SUB)]:
             m = rec_rank == v
@@ -206,21 +248,18 @@ def main():
         # RECORDING level, REFIT the leave-one-cage-out LDA on the shuffled labels (so the whole
         # supervised pipeline is re-run -> not circular), recompute the per-recording AUC.
         if args.n_perm > 0:
-            recs_u = np.unique(rid_all)
-            rec_rank_true = np.array([rank[rid_all == r][0] for r in recs_u])
+            recs_u = np.unique(rid_ts)
+            rec_rank_true = np.array([rank_ts[rid_ts == r][0] for r in recs_u])
 
-            def rec_lda_auc(window_rank):
-                s = logo_lda_scores(lat, window_rank, cage_all)
-                rm = np.array([s[rid_all == r].mean() for r in recs_u])
-                rr = np.array([window_rank[rid_all == r][0] for r in recs_u])
-                return roc_auc_score(rr, rm)
-
-            obs_auc = rec_lda_auc(rank)
+            obs_auc = rec_lda_auc(lat, rank_ts, cage_ts, rid_ts, recs_u)
             rng = np.random.RandomState(131)
-            null = np.empty(args.n_perm)
-            for i in range(args.n_perm):
+            # pre-shuffle serially (deterministic), then fan the LDA refits out across cores
+            perms = []
+            for _ in range(args.n_perm):
                 mp = dict(zip(recs_u, rng.permutation(rec_rank_true)))
-                null[i] = rec_lda_auc(np.array([mp[r] for r in rid_all]))
+                perms.append(np.array([mp[r] for r in rid_ts]))
+            null = np.asarray(Parallel(n_jobs=n_jobs())(
+                delayed(rec_lda_auc)(lat, yp, cage_ts, rid_ts, recs_u) for yp in perms))
             p = (1.0 + np.sum(null >= obs_auc)) / (1.0 + args.n_perm)
             print("\n" + "=" * 72)
             print("(F) PERMUTATION TEST on the per-recording LDA separation (LOCO-by-cage)")

@@ -10,6 +10,11 @@
 # (leave-one-subject-out, folds 0-7). collect_folds.py is omitted: it is a pure
 # leave-one-recording-out decoder and is superseded by analyze_valence's
 # leave-one-subject-out (logo) decoding.
+# PER-TIMESTEP (2026-06-30): (B)-(E) now use EVERY timestep's latent (~1500/window) instead
+# of the per-window mean, so the permutation test (part D) is ~1500x more rows. It is now
+# fanned across cores (joblib honors --cpus-per-task=16 below), so walltime is 2 h. To go
+# faster still: append --latent_stride N (every Nth timestep) and/or --n_perm 200, or raise
+# --cpus-per-task.
 # Outputs:
 #   (A) recording-level breathing-rate / switch-rate ROC-AUC      -> log
 #   (B) pooled latent PCA colored by valence                      -> respiration/plot/
@@ -30,15 +35,18 @@
 #SBATCH --partition=hpg-default
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=16gb
-#SBATCH --time=00:30:00
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=24gb
+#SBATCH --time=02:00:00
 
 module load conda
 conda activate SSRNN
 
 cd /home/t.heeps/blue_npadillacoreano/npadillacoreano/share/respiration-project/Supervised_SRNN_respiration
 mkdir -p logs
+
+# convenience: always-current pointer to THIS run's log -> tail -f logs/classifier_latest.log
+ln -sf classifier_${SLURM_JOB_ID}.log logs/classifier_latest.log
 
 CFG=respiration/valence/config_respiration_hpg.yaml
 

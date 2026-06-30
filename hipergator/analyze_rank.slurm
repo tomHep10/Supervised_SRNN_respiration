@@ -8,6 +8,11 @@
 #   (D) permutation test (LOCO-by-cage)                               -> plot_rank/
 #   (E) LDA projection (leave-one-cage-out)                           -> plot_rank/
 #
+# PER-TIMESTEP (2026-06-30): (B)-(F) now use EVERY timestep's latent (~1500/window) instead
+# of the per-window mean, so the permutation tests (D, F) are ~1500x more rows. They are now
+# fanned across cores (joblib honors --cpus-per-task=16 below), so walltime is 2 h. To go
+# faster still: append --latent_stride N and/or --n_perm 200, or raise --cpus-per-task.
+#
 # PREREQ: rank LOCO training finished (respiration/result_rank/resp_srnn_cage_h8_fold*.pt).
 # Submit from the repo root:
 #   sbatch hipergator/analyze_rank.slurm
@@ -21,15 +26,18 @@
 #SBATCH --partition=hpg-default
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=16gb
-#SBATCH --time=00:30:00
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=24gb
+#SBATCH --time=02:00:00
 
 module load conda
 conda activate SSRNN
 
 cd /home/t.heeps/blue_npadillacoreano/npadillacoreano/share/respiration-project/Supervised_SRNN_respiration
 mkdir -p logs
+
+# convenience: always-current pointer to THIS run's log -> tail -f logs/rank_classifier_latest.log
+ln -sf rank_classifier_${SLURM_JOB_ID}.log logs/rank_classifier_latest.log
 
 CFG=${1:-respiration/rank/config_rank_hpg.yaml}   # pass a cohort config as arg 1 to run a different cohort
 

@@ -18,6 +18,14 @@ from sklearn.linear_model import LogisticRegression, LinearRegression
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import LeaveOneGroupOut
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+from joblib import Parallel, delayed
+
+
+def n_jobs():
+    """How many cores to fan the permutation decodes across. Honors the SLURM allocation
+    (SLURM_CPUS_PER_TASK) so we never oversubscribe a shared node; -1 (all cores joblib
+    sees) off-cluster. Bump --cpus-per-task in the .slurm file to make the perm test faster."""
+    return int(os.environ.get("SLURM_CPUS_PER_TASK", "0")) or -1
 
 
 def load_ckpt(path, h, device):
@@ -43,6 +51,43 @@ def per_window_mean_latent(rnninfer, y):
     with torch.no_grad():
         _, _, mean_out = rnninfer(y)
     return mean_out.cpu().numpy().mean(axis=1)            # (n,h)
+
+
+def per_timestep_latent(rnninfer, y, stride=1):
+    """EVERY inferred latent, NOT averaged over the window.
+
+    `per_window_mean_latent` collapses the T (=1500) timesteps of each window to a single
+    mean vector. This instead keeps each timestep, returning the latents flattened to
+    (n_windows * T_kept, h) -- ~1500 latents per window -- so the analyses see the within-
+    window trajectory rather than its average. Pair the flattened latent with
+    `expand_to_timesteps()` on any per-window metadata (labels, groups, recording id) so
+    rows stay aligned. `stride > 1` keeps every `stride`-th timestep to cut compute while
+    preserving coverage. Returns (latent_flat (n*T_kept, h), T_kept)."""
+    rnninfer.eval()
+    with torch.no_grad():
+        _, _, mean_out = rnninfer(y)                       # (n, T, h)
+    lat = mean_out.cpu().numpy()
+    if stride > 1:
+        lat = lat[:, ::stride, :]
+    n, T_kept, h = lat.shape
+    return lat.reshape(n * T_kept, h), T_kept              # row order: win0 t0..tT, win1 t0..
+
+
+def per_timestep_state(model, rnninfer, y, device, stride=1):
+    """Per-timestep discrete SRNN state (argmax of the posterior), shape (n, T_kept).
+    These are the model's own inhale/exhale phases -- used to check whether the latent
+    micro-state clusters subdivide the breathing cycle."""
+    X = torch.zeros_like(y)
+    _, _, pos, *_ = srnn_train.eval_(model, rnninfer, X, y, device)
+    states = np.exp(pos).argmax(-1)                        # (n, T)
+    return states[:, ::stride] if stride > 1 else states
+
+
+def expand_to_timesteps(arr, T_kept):
+    """Repeat each per-window value T_kept times so per-window metadata (labels, groups,
+    recording ids, a per-window covariate) lines up with the flattened per-timestep
+    latents from `per_timestep_latent`. Row order matches that flattening."""
+    return np.repeat(np.asarray(arr), T_kept, axis=0)
 
 
 def logo_decode(X, y, groups, residualize=None):
@@ -81,11 +126,16 @@ def permutation_test(X, lab_window, rid_window, groups, n_perm, seed, residualiz
     recs = np.unique(rid_window)
     rec_lab = np.array([lab_window[rid_window == r][0] for r in recs])   # one label per recording
     rng = np.random.RandomState(seed)
-    null = np.empty(n_perm)
-    for i in range(n_perm):
+    # Pre-generate every shuffled label vector SERIALLY (cheap; keeps the RNG stream
+    # deterministic no matter how many cores run), then fan the expensive LOGO decodes out
+    # across cores. joblib auto-memmaps the big constant arrays (X, groups) so they're
+    # shared, not re-pickled per task. Reproducible AND parallel.
+    perms = []
+    for _ in range(n_perm):
         mapping = dict(zip(recs, rng.permutation(rec_lab)))
-        y_perm = np.array([mapping[r] for r in rid_window])
-        null[i] = logo_decode(X, y_perm, groups, residualize=residualize)
+        perms.append(np.array([mapping[r] for r in rid_window]))
+    null = np.asarray(Parallel(n_jobs=n_jobs())(
+        delayed(logo_decode)(X, y_perm, groups, residualize=residualize) for y_perm in perms))
     p = (1.0 + np.sum(null >= obs)) / (1.0 + n_perm)                     # one-sided, +1 smoothing
     return obs, null, p
 
